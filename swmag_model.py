@@ -67,9 +67,7 @@ rsd_path = working_dir+'identifying_regions_data/twins_era_stats_dict_radius_reg
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {DEVICE}')
 
-CONFIG = {'region_numbers': [387, 61, 202, 287, 207, 361, 137, 184, 36, 19, 9, 163, 16, 270, 194, 82,
-								83, 143, 223, 44, 173, 321, 366, 383, 122, 279, 14, 95, 237, 26, 166, 86,
-								62, 327, 293, 241, 107, 55, 111, 401, 400],
+CONFIG = {'batch_size':16,
 			'time_history':30,
 			'random_seed':7}
 
@@ -79,33 +77,23 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 	# loading all the datasets and dictonaries
 	RP = utils.RegionPreprocessing()
 
-	regional_dfs = RP()
+	supermag_df = RP()
 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
 
 	# converting the solarwind data to log10
 	solarwind['logT'] = np.log10(solarwind['T'])
 	solarwind.drop(columns=['T'], inplace=True)
 
-	# reduce the regions dict to be only the ones that have keys in the region_numbers list
-	regions = regions[f'region_{region}']
-	stats = stats[f'region_{region}']
-
-	# getting dbdt and rsd data for the region
-	supermag_df = utils.combining_stations_into_regions(regions['station'], stats, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], mean=True, std=True, maximum=True, median=True)
-
-	# getting the mean latitude for the region and attaching it to the regions dictionary
-	mean_lat = utils.getting_mean_lat(regions['station'])
-
 	thresholds = [supermag_df[target_var].quantile(percentile) for percentile in percentiles]
 
 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
 
 
-	return merged_df, mean_lat, thresholds
+	return merged_df, thresholds
 
 
 
-def getting_prepared_data(target_var, region, get_features=False, do_scaling=True):
+def getting_prepared_data(target_var, cluster, region, get_features=False, do_scaling=True):
 	'''
 	Calling the data prep class without the TWINS data for this version of the model.
 
@@ -119,7 +107,7 @@ def getting_prepared_data(target_var, region, get_features=False, do_scaling=Tru
 
 	'''
 
-	merged_df, mean_lat, thresholds = loading_data(target_var=target_var, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
+	merged_df, thresholds = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
 
 	# target = merged_df['classification']
 	target = merged_df[f'rolling_{target_var}']
@@ -131,11 +119,9 @@ def getting_prepared_data(target_var, region, get_features=False, do_scaling=Tru
 
 	print('Columns in Merged Dataframe: '+str(merged_df.columns))
 
-	temp_version = 'final_1'
-
 	# loading the data corresponding to the twins maps if it has already been calculated
-	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_time_history_{CONFIG["time_history"]}_version_{temp_version}.pkl'):
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_time_history_{CONFIG["time_history"]}_version_{temp_version}.pkl', 'rb') as f:
+	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
 			storms_extracted_dict = pickle.load(f)
 		storms = storms_extracted_dict['storms']
 		target = storms_extracted_dict['target']
@@ -144,7 +130,7 @@ def getting_prepared_data(target_var, region, get_features=False, do_scaling=Tru
 	else:
 		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var=f'rolling_{target_var}', concat=False)
 		storms_extracted_dict = {'storms':storms, 'target':target}
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_time_history_{CONFIG["time_history"]}_version_{temp_version}.pkl', 'wb') as f:
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
 
 	# making sure the target variable has been dropped from the input data
@@ -264,6 +250,7 @@ def getting_prepared_data(target_var, region, get_features=False, do_scaling=Tru
 		return torch.tensor(x_train), torch.tensor(x_val), torch.tensor(x_test), torch.tensor(y_train), torch.tensor(y_val), torch.tensor(y_test), date_dict
 	else:
 		return torch.tensor(x_train), torch.tensor(x_val), torch.tensor(x_test), torch.tensor(y_train), torch.tensor(y_val), torch.tensor(y_test), date_dict, features
+
 
 class CRSP(nn.Module):
 	'''
@@ -554,6 +541,8 @@ def main():
 	Pulls all the above functions together. Outputs a saved file with the results.
 
 	'''
+	
+
 
 	# loading all data and indicies
 	print('Loading data...')
