@@ -43,6 +43,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from spacepy import pycdf
 from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
 
 import utils
 
@@ -54,7 +55,8 @@ TARGET = 'rsd'
 REGION = 163
 RANDOM_SEED = 7
 BATCH_SIZE = 16
-VERSION = 'non_twins_pytorch_v0-1'
+
+VERSION = 'swmag_v0'
 
 working_dir = '../../../../data/mike_working_dir/'
 region_path = working_dir+'identifying_regions_data/adjusted_regions.pkl'
@@ -417,7 +419,7 @@ class Early_Stopping():
 					'optimizer':self.optimizer.state_dict(),
 					'best_epoch':self.best_epoch,
 					'finished_training':False},
-					f'models/swmag_{VERSION}.pt')
+					f'models/{VERSION}.pt')
 
 
 def resume_training(model, optimizer):
@@ -450,10 +452,38 @@ def resume_training(model, optimizer):
 	return model, optimizer, epoch, finished_training
 
 
-def fit_model(model, train, val, val_loss_patience=25, num_epochs=500):
+def fit_autoencoder(model, train, val, val_loss_patience=25, overfit_patience=5, num_epochs=500):
 
-	if not os.path.exists(f'models/non_twins_{VERSION}.pt'):
+	'''
+	_summary_: Function to train the autoencoder model.
 
+	Args:
+		model (object): the model to be trained
+		train (torch.utils.data.DataLoader): the training data
+		val (torch.utils.data.DataLoader): the validation data
+		val_loss_patience (int): the number of epochs to wait before stopping the model
+									if the validation loss does not decrease
+		overfit_patience (int): the number of epochs to wait before stopping the model
+									if the training loss is significantly lower than the
+									validation loss
+		num_epochs (int): the number of epochs to train the model
+		pretraining (bool): whether the model is being pre-trained
+
+	Returns:
+		object: the trained model
+	'''
+
+	# checking if the model has already been trained, loading it if it exists
+	if os.path.exists(f'models/{VERSION}.pt'):
+		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer, pretraining=pretraining)
+	else:
+		finished_training = False
+		current_epoch = 0
+
+	# checking to see if the model was already trained or was interupted during training
+	if not finished_training:
+
+		# initializing the lists to hold the training and validation loss which will be used to plot the losses as a function of epoch
 		train_loss_list, val_loss_list = [], []
 
 		# moving the model to the available device
@@ -462,12 +492,12 @@ def fit_model(model, train, val, val_loss_patience=25, num_epochs=500):
 		# defining the loss function and the optimizer
 		criterion = CRSP()
 		optimizer = optim.Adam(model.parameters(), lr=1e-7)
-		scaler = torch.cuda.amp.GradScaler()
 
 		# initalizing the early stopping class
 		early_stopping = Early_Stopping(decreasing_loss_patience=val_loss_patience)
 
-		for epoch in range(num_epochs):
+		# looping through the epochs
+		while current_epoch < num_epochs:
 
 			# starting the clock for the epoch
 			stime = time.time()
@@ -478,45 +508,62 @@ def fit_model(model, train, val, val_loss_patience=25, num_epochs=500):
 			# initializing the running loss
 			running_training_loss, running_val_loss = 0.0, 0.0
 
-			# shuffling data and creating batches
-			for x, y in train:
-				x = x.to(DEVICE, dtype=torch.float)
+			# using the training set to train the model
+			for X, y in train:
+
+				# moving the data to the available device
+				X = X.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
 
-				x = x.unsqueeze(1)
+				# adding a channel dimension to the data
+				X = X.unsqueeze(1)
 
 				# forward pass
-				with torch.cuda.amp.autocast():
-					output = model(x)
+				output = model(X)
 
-					loss = criterion(output, y)
-					# loss.requires_grad = True
+				# calculating the loss
+				loss = criterion(output, y)
 
 				# backward pass
 				optimizer.zero_grad()
-				scaler.scale(loss).backward()
-				scaler.step(optimizer)
-				scaler.update()
+				loss.backward()
+				optimizer.step()
 
-				# adding the loss to the running loss
+				# emptying the cuda cache
+				X = X.to('cpu')
+				y = y.to('cpu')
+
+				# adding the loss to the running training loss
 				running_training_loss += loss.to('cpu').item()
 
-			# setting the model to evaluation mode
+			
+			# setting the model to eval mode so the dropout layers are not used during validation and weights are not updated
 			model.eval()
 
 			# using validation set to check for overfitting
-			with torch.no_grad():
-				for x, y in val:
-					x = x.to(DEVICE, dtype=torch.float)
-					y = y.to(DEVICE, dtype=torch.float)
+			# looping through the batches
+			for X, y in val:
 
-					x = x.unsqueeze(1)
+				# moving the data to the available device
+				X = X.to(DEVICE, dtype=torch.float)
+				y = y.to(DEVICE, dtype=torch.float)
 
-					output = model(x)
+				# adding a channel dimension to the data
+				X = X.unsqueeze(1)
 
+				# forward pass with no gradient calculation
+				with torch.no_grad():
+
+					output = model(X)
+
+					# calculating the loss
 					val_loss = criterion(output, y)
 
-					# adding the loss to the running loss
+					# emptying the cuda cache
+					X = X.to('cpu')
+					y = y.to('cpu')
+
+					# adding the loss to the running val loss
 					running_val_loss += val_loss.to('cpu').item()
 
 			# getting the average loss for the epoch
@@ -527,31 +574,62 @@ def fit_model(model, train, val, val_loss_patience=25, num_epochs=500):
 			train_loss_list.append(loss)
 			val_loss_list.append(val_loss)
 
-			# checking for early stopping
-			if early_stopping(train_loss=loss, val_loss=val_loss, model=model, epoch=epoch):
+			# checking for early stopping or the end of the training epochs
+			if (early_stopping(train_loss=loss, val_loss=val_loss, model=model, optimizer=optimizer, epoch=current_epoch)) or (current_epoch == num_epochs-1):
+
+				# saving the final model
+				gc.collect()
+
+				# model = Autoencoder()
+
+				# clearing the cuda cache
+				torch.cuda.empty_cache()
+				gc.collect()
+
+				# clearing the model so the best one can be loaded without overwhelming the gpu memory
+				model = None
+				model = CNN()
+
+				# loading the best model version
+				final = torch.load(f'models/{VERSION}.pt')
+
+				# setting the finished training flag to True
+				final['finished_training'] = True
+
+				# getting the best model state dict
+				model.load_state_dict(final['model'])
+
+				# saving the final model
+				torch.save(final, f'models/{VERSION}.pt')
+
+				# breaking the loop
 				break
 
 			# getting the time for the epoch
 			epoch_time = time.time() - stime
 
-			# if epoch % 5 == 0:
-			print(f'Epoch [{epoch}/{num_epochs}], Loss: {loss:.4f} Validation Loss: {val_loss:.4f}' + f' Epoch Time: {epoch_time:.2f} seconds')
+			# printing the loss for the epoch
+			print(f'Epoch [{current_epoch}/{num_epochs}], Loss: {loss:.4f} Validation Loss: {val_loss:.4f}' + f' Epoch Time: {epoch_time:.2f} seconds')
 
 			# emptying the cuda cache
 			torch.cuda.empty_cache()
 
-			# getting the best model
-
-		# getting the best params saved in the Early Stopping class
-		model.load_state_dict(torch.load(f'models/non_twins_{VERSION}.pt'))
+			# updating the epoch
+			current_epoch += 1
 
 		# transforming the lists to a dataframe to be saved
 		loss_tracker = pd.DataFrame({'train_loss':train_loss_list, 'val_loss':val_loss_list})
-		loss_tracker.to_feather(f'outputs/non_twins_{VERSION}_loss_tracker.feather')
+		loss_tracker.to_feather(f'outputs/{VERSION}_loss_tracker.feather')
+
+		gc.collect()
 
 	else:
 		# loading the model if it has already been trained.
-		model.load_state_dict(torch.load(f'models/non_twins_{VERSION}.pt')) 			# loading the models if already trained
+		try:
+			final = torch.load(f'models/{VERSION}.pt')
+			model.load_state_dict(final['model'])
+		except KeyError:
+			model.load_state_dict(torch.load(f'models/autoencoder_{VERSION}.pt'))
 
 	return model
 
@@ -580,6 +658,18 @@ def evaluation(model, test):
 	# making sure the model is on the correct device
 	model.to(DEVICE, dtype=torch.float)
 
+	layers = {"encoder.1":"conv1",
+			"encoder.4":"conv2",
+			"encoder.7":"conv3",
+			"encoder.10":"fc1",
+			"decoder.0":"fc2",
+			"decoder.2":"deconv1",
+			"decoder.4":"deconv2",
+			"decoder.6":"deconv3",
+			"decoder.8":"deconv4"}
+
+	output_lists = {layer:[] for layer in layers.values()}
+
 	with torch.no_grad():
 		for x, y in test:
 
@@ -590,9 +680,13 @@ def evaluation(model, test):
 
 			predicted = model(x)
 			# getting shape of tensor
-			print(predicted.size())
 			loss = F.mse_loss(predicted[[0]], y)
 			running_loss += loss.item()
+
+			model_layers = create_feature_extractor(model, return_nodes=layers)
+			intermediate_layers = model_layers(x)
+			for layer in layers.values():
+				output_lists[layer].append(intermediate_layers[layer].to('cpu').numpy())
 
 			# making sure the predicted value is on the cpu
 			if predicted.get_device() != -1:
@@ -610,7 +704,7 @@ def evaluation(model, test):
 			xtest_list.append(x)
 			ytest_list.append(y)
 
-	return np.concatenate(predicted_list, axis=0), np.concatenate(xtest_list, axis=0), np.concatenate(ytest_list, axis=0), running_loss/len(test)
+	return np.concatenate(predicted_list, axis=0), np.concatenate(xtest_list, axis=0), np.concatenate(ytest_list, axis=0), output_lists, running_loss/len(test)
 
 
 def main():
