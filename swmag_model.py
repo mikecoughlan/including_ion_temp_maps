@@ -49,6 +49,9 @@ import utils
 
 pd.options.mode.chained_assignment = None
 
+# muting pandas warnings
+pd.options.mode.chained_assignment = None
+
 os.environ["CDF_LIB"] = "~/CDF/lib"
 
 RANDOM_SEED = 7

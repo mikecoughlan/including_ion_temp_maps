@@ -244,7 +244,7 @@ class RegionPreprocessing():
 
 		for stat in self.region['stations']:
 			df = self.loading_supermag(stat)
-			self.lons_dict[stat] = df['GEOLON'][0]
+			self.lons_dict[stat] = df['GEOLON'].iloc[0]
 			df = df[start_time:end_time]
 			self.mlt_df[stat] = df['MLT']
 			if self.features is not None:
