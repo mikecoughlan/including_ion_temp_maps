@@ -32,11 +32,6 @@ supermag_dir = data_dir+'supermag/feather_files/'
 regions_dict = data_dir+'mike_working_dir/identifying_regions_data/adjusted_regions.pkl'
 regions_stat_dict = data_dir+'mike_working_dir/identifying_regions_data/twins_era_stats_dict_radius_regions_min_2.pkl'
 
-region_numbers = [83, 143, 223, 44, 173, 321, 366, 383, 122, 279, 14, 95, 237, 26, 166, 86,
-						387, 61, 202, 287, 207, 361, 137, 184, 36, 19, 9, 163, 16, 270, 194, 82,
-						62, 327, 293, 241, 107, 55, 111, 401]
-
-
 def loading_dicts():
 	'''
 	Loads the regional dictionaries and stats dictionaries
@@ -173,6 +168,54 @@ class RegionPreprocessing():
 		return df
 
 
+	def classification_column(self, df, param, percentile=0.99, forecast=15, window=1):
+		'''
+		Creating a new column which labels whether there will be a crossing of threshold
+			by the param selected in the forecast window.
+
+		Args:
+			df (pd.dataframe): dataframe containing the param values.
+			param (str): the paramaeter that is being examined for threshold crossings (dBHt for this study).
+			thresh (float or list of floats): threshold or list of thresholds to define parameter crossing.
+			forecast (int): how far out ahead we begin looking in minutes for threshold crossings.
+								If forecast=30, will begin looking 30 minutes ahead.
+			window (int): time frame in which we look for a threshold crossing starting at t=forecast.
+								If forecast=30, window=30, we look for threshold crossings from t+30 to t+60
+
+		Returns:
+			pd.dataframe: df containing a bool column called crossing and a persistance colmun
+		'''
+
+		# creating the shifted parameter column
+		thresh = df[param].quantile(percentile)
+
+		df[f'shifted_{param}'] = df[param].shift(-forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
+
+		if window > 0:																				# index, the shift time is the negative of the forecast instead of positive.
+			indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window)			# Yeah this is annoying, have to create a forward rolling indexer because it won't do it automatically.
+			df['window_max'] = df[f'shifted_{param}'].rolling(indexer, min_periods=1).max()		# creates new column in the df labeling the maximum parameter value in the forecast:forecast+window time frame
+		# df['pers_max'] = df[param].rolling(0, min_periods=1).max()						# looks backwards to find the max param value in the time history limit
+		else:
+			df['window_max'] = df[f'shifted_{param}']
+		# df.reset_index(drop=False, inplace=True)											# resets the index
+
+		'''This section creates a binary column for each of the thresholds. Binary will be one if the parameter
+			goes above the given threshold, and zero if it does not.'''
+
+		conditions = [(df['window_max'] < thresh), (df['window_max'] >= thresh)]			# defining the conditions
+		# pers_conditions = [(df['pers_max'] < thresh), (df['pers_max'] >= thresh)]			# defining the conditions for a persistance model
+
+		binary = [0, 1] 																	# 0 if not cross 1 if cross
+
+		df['classification'] = np.select(conditions, binary)						# new column created using the conditions and the binary
+		# df['persistance'] = np.select(pers_conditions, binary)				# creating the persistance column
+
+		# df.drop(['pers_max', 'window_max', f'shifted_{param}'], axis=1, inplace=True)			# removes the working columns for memory purposes
+		df.drop(['window_max', f'shifted_{param}'], axis=1, inplace=True)			# removes the working columns for memory purposes
+
+		return df
+
+
 	def getting_dbdt_dataframe(self):
 
 		dbdt_df = pd.DataFrame(index=pd.date_range(start='2009-07-20', end='2017-12-31', freq='min'))
@@ -280,6 +323,8 @@ class RegionPreprocessing():
 		regional_df['MLT'] = mlt
 		regional_df['cosMLT'] = np.cos(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 		regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
+
+		regional_df = self.classification_column(df=regional_df, param='rsd')
 
 		if map_keys is not None:
 			regional_df = regional_df[regional_df.index.isin(map_keys)]

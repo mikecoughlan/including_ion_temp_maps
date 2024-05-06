@@ -2,11 +2,6 @@
 #
 # exmining_twins_and_supermag/non_twins_modeling_v0.py
 #
-# Performing the modeling using the Solar Wind and Ground Magnetomoeter data.
-# TWINS data passes through a pre-trained autoencoder that reduces the TWINS maps
-# to a reuced dimensionality. This data is then concatenated onto the model after
-# both branches of the CNN hae been flattened, and before the dense layers.
-# Similar model to Coughlan (2023) but with a different target variable.
 #
 ####################################################################################
 
@@ -44,6 +39,8 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from spacepy import pycdf
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import utils
 
@@ -83,6 +80,7 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 									mean=True, std=True, maximum=True, median=True)
 
 	supermag_df = RP()
+
 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
 
 	# converting the solarwind data to log10
@@ -92,7 +90,6 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 	thresholds = [supermag_df[target_var].quantile(percentile) for percentile in percentiles]
 
 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
-
 
 	return merged_df, thresholds
 
@@ -118,7 +115,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# reducing the dataframe to only the features that will be used in the model plus the target variable
 	vars_to_keep = [f'rolling_{target_var}', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
-					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
+					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT', 'classification']
 	merged_df = merged_df[vars_to_keep]
 
 	print('Columns in Merged Dataframe: '+str(merged_df.columns))
@@ -132,7 +129,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# if not, calculating the twins maps and extracting the storms
 	else:
-		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var=f'rolling_{target_var}', concat=False)
+		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False)
 		storms_extracted_dict = {'storms':storms, 'target':target}
 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
@@ -215,7 +212,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 		x_test = [scaler.transform(x) for x in x_test]
 
 	# saving the scaler
-	with open(f'models/{TARGET}/{cluster}_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
+	with open(f'models/{target_var}/{cluster}_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
 		pickle.dump(scaler, f)
 
 	print(f'shape of x_train: {len(x_train)}')
@@ -242,13 +239,11 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_val: {x_val.shape}')
 	print(f'shape of x_test: {x_test.shape}')
 
-	print(f'Nans in training data: {np.isnan(x_train).sum()}')
-	print(f'Nans in validation data: {np.isnan(x_val).sum()}')
-	print(f'Nans in testing data: {np.isnan(x_test).sum()}')
+	print(f'shape of y_train: {y_train.shape}')
+	print(f'shape of y_val: {y_val.shape}')
+	print(f'shape of y_test: {y_test.shape}')
 
-	print(f'Nans in training target: {np.isnan(y_train).sum()}')
-	print(f'Nans in validation target: {np.isnan(y_val).sum()}')
-	print(f'Nans in testing target: {np.isnan(y_test).sum()}')
+	print(f'Sample of y_train: {y_train[:5]}')
 
 	if not get_features:
 		return torch.tensor(x_train), torch.tensor(x_val), torch.tensor(x_test), torch.tensor(y_train), torch.tensor(y_val), torch.tensor(y_test), date_dict
@@ -307,6 +302,7 @@ class PrintLayer(nn.Module):
 class SWMAG(nn.Module):
 	def __init__(self):
 		super(SWMAG, self).__init__()
+		
 		self.model = nn.Sequential(
 
 			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
@@ -323,7 +319,7 @@ class SWMAG(nn.Module):
 			nn.Linear(256, 128),
 			nn.ReLU(),
 			nn.Dropout(0.2),
-			nn.Linear(128, 1),
+			nn.Linear(128, 2),
 			nn.Sigmoid()
 		)
 
@@ -443,13 +439,13 @@ def resume_training(model, optimizer):
 	'''
 
 	try:
-		checkpoint = torch.load(f'models/autoencoder_{VERSION}.pt')
+		checkpoint = torch.load(f'models/{VERSION}.pt')
 		model.load_state_dict(checkpoint['model'])
 		optimizer.load_state_dict(checkpoint['optimizer'])
 		epoch = checkpoint['best_epoch']
 		finished_training = checkpoint['finished_training']
 	except KeyError:
-		model.load_state_dict(torch.load(f'models/autoencoder_{VERSION}.pt'))
+		model.load_state_dict(torch.load(f'models/{VERSION}.pt'))
 		optimizer = None
 		epoch = 0
 		finished_training = True
@@ -460,7 +456,7 @@ def resume_training(model, optimizer):
 def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_epochs=500):
 
 	'''
-	_summary_: Function to train the autoencoder model.
+	_summary_: Function to train the swmag model.
 
 	Args:
 		model (object): the model to be trained
@@ -477,10 +473,10 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	Returns:
 		object: the trained model
 	'''
-
+	optimizer = optim.Adam(model.parameters(), lr=1e-7)
 	# checking if the model has already been trained, loading it if it exists
 	if os.path.exists(f'models/{VERSION}.pt'):
-		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer, pretraining=pretraining)
+		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer)
 	else:
 		finished_training = False
 		current_epoch = 0
@@ -585,8 +581,6 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				# saving the final model
 				gc.collect()
 
-				# model = Autoencoder()
-
 				# clearing the cuda cache
 				torch.cuda.empty_cache()
 				gc.collect()
@@ -634,7 +628,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 			final = torch.load(f'models/{VERSION}.pt')
 			model.load_state_dict(final['model'])
 		except KeyError:
-			model.load_state_dict(torch.load(f'models/autoencoder_{VERSION}.pt'))
+			model.load_state_dict(torch.load(f'models/{VERSION}.pt'))
 
 	return model
 
