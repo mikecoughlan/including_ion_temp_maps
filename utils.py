@@ -132,11 +132,12 @@ def getting_mean_lat(stations):
 
 class RegionPreprocessing():
 
-	def __init__(self, region=None, features=None, mean=False, std=False, maximum=False, median=False):
-		
+	def __init__(self, clusters=None, region=None, features=None, mean=False, std=False, maximum=False, median=False):
+
 		if region is None:
 			raise ValueError('Must specify a region to analyze.')
-		
+
+		self.clusters = clusters
 		self.region = region
 		self.features = features
 		self.mean = mean
@@ -167,7 +168,7 @@ class RegionPreprocessing():
 		df['sin_theta'] = np.sin(df['theta'] * np.pi / 180)			# calculates the sine of the angle of B_H
 
 		return df
-	
+
 
 	def getting_dbdt_dataframe(self):
 
@@ -189,9 +190,9 @@ class RegionPreprocessing():
 		# if the difference in geolon is greater than 180 degrees then convert all the values from 0-360 to -180-180
 		lons_list = list(self.lons_dict.values())
 		if max(lons_list) - min(lons_list) > 180:
-			for key in self.lons_dict.keys():
-				if self.lons_dict[key] > 180:
-					self.lons_dict[key] = self.lons_dict[key] - 360
+			for key, value in self.lons_dict.items():
+				if value > 180:
+					value = value - 360
 		lons_list = list(self.lons_dict.values())
 		median = np.median(lons_list)
 		# finding the station closest to the median longitude
@@ -204,16 +205,16 @@ class RegionPreprocessing():
 
 	def calculating_rsd(self):
 
-		dbdt_df = getting_dbdt_dataframe(self.region)
+		dbdt_df = self.getting_dbdt_dataframe()
 		rsd = pd.DataFrame(index=dbdt_df.index)
-		
+
 		# calculating the RSD
 		for col in dbdt_df.columns:
 			ss = dbdt_df[col]
 			temp_df = dbdt_df.drop(col,axis=1)
 			ra = temp_df.mean(axis=1)
 			rsd[col] = ss-ra
-		
+
 		max_rsd = rsd.max(axis=1)
 		max_station = rsd.idxmax(axis=1)
 		rsd['max_rsd'] = max_rsd
@@ -238,9 +239,9 @@ class RegionPreprocessing():
 			for feature in self.features:
 				feature_dfs[feature] = pd.DataFrame(index=twins_time_period)
 
-		for stat in self.stations:
-			df = loading_supermag(stat)
-			lons_dict[stat] = df['GEOLON'][0]
+		for stat in self.region['station']:
+			df = self.loading_supermag(stat)
+			self.lons_dict[stat] = df['GEOLON'][0]
 			df = df[start_time:end_time]
 			self.mlt_df[stat] = df['MLT']
 			if self.features is not None:
@@ -268,8 +269,8 @@ class RegionPreprocessing():
 
 		indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=15)
 
-		mlt = finding_mlt()
-		rsd = calculating_rsd(self.region)
+		mlt = self.finding_mlt()
+		rsd = self.calculating_rsd()
 
 		regional_df['rsd'] = rsd['max_rsd']
 		regional_df['rolling_rsd'] = rsd['max_rsd'].rolling(indexer, min_periods=1).max()
@@ -278,21 +279,19 @@ class RegionPreprocessing():
 		regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 
 		if map_keys is not None:
-			segmented_df = regional_df[regional_df.index.isin(map_keys)]
-			return segmented_df
+			regional_df = regional_df[regional_df.index.isin(map_keys)]
 
-		else:
-			return regional_df
+		return regional_df
 
 
 	def __call__(self, cluster, region, cluster_dict='cluster_dict.pkl'):
 
 		with open(cluster_dict, 'rb') as f:
 			self.clusters = pickle.load(f)
-		
-		self.region = clusters[cluster][region]
 
-		regional_df = combining_stations_into_regions()
+		self.region = self.clusters[cluster][region]
+
+		regional_df = self.combining_stations_into_regions()
 
 		return regional_df
 
