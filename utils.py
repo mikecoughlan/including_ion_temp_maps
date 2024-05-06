@@ -134,6 +134,9 @@ class RegionPreprocessing():
 
 	def __init__(self, clusters=None, region=None, features=None, mean=False, std=False, maximum=False, median=False):
 
+		if clusters is None:
+			raise ValueError('Must specify a cluster to analyze.')
+
 		if region is None:
 			raise ValueError('Must specify a region to analyze.')
 

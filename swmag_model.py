@@ -334,33 +334,67 @@ class Early_Stopping():
 	'''
 
 	def __init__(self, decreasing_loss_patience=25):
+		'''
+		Initializing the class.
+
+		Args:
+			decreasing_loss_patience (int): the number of epochs to wait before stopping the model if the validation loss does not decrease
+			pretraining (bool): whether the model is being pre-trained. Just used for saving model names.
+
+		'''
+
+		# initializing the variables
 		self.decreasing_loss_patience = decreasing_loss_patience
 		self.loss_counter = 0
+		self.training_counter = 0
 		self.best_score = None
 		self.early_stop = False
 		self.best_epoch = None
 
-	def __call__(self, train_loss, val_loss, model, epoch):
+	def __call__(self, train_loss, val_loss, model, optimizer, epoch):
+		'''
+		Function to call the early stopping condition.
+
+		Args:
+			train_loss (float): the training loss for the model
+			val_loss (float): the validation loss for the model
+			model (object): the model to be saved
+			epoch (int): the current epoch
+
+		Returns:
+			bool: whether the model should stop training or not
+		'''
+
+		# using the absolute value of the loss for negatively orientied loss functions
+		val_loss = abs(val_loss)
+
+		# initializing the best score if it is not already
 		self.model = model
+		self.optimizer = optimizer
 		if self.best_score is None:
+			self.best_train_loss = train_loss
 			self.best_score = val_loss
 			self.best_loss = val_loss
 			self.save_checkpoint(val_loss)
 			self.best_epoch = epoch
-		elif val_loss > self.best_score:
-			self.loss_counter += 1
-			if self.loss_counter >= self.decreasing_loss_patience:
-				print(f'Engaging Early Stopping due to lack of improvement in validation loss. Best model saved at epoch {self.best_epoch} with a training loss of {self.best_loss} and a validation loss of {self.best_score}')
-				return True
-		# elif val_loss > (1.5 * train_loss):
-		# 	self.training_counter += 1
-		# 	if self.training_counter >= self.training_diff_patience:
-		# 		print(f'Engaging Early Stopping due to large seperation between train and val loss. Best model saved at epoch {self.best_epoch} with a training loss of {self.best_loss} and a validation loss of {self.best_score}')
-		# 		return True
 
+		# if the validation loss greater than the best score add one to the loss counter
+		elif val_loss >= self.best_score:
+			self.loss_counter += 1
+
+			# if the loss counter is greater than the patience, stop the model training
+			if self.loss_counter >= self.decreasing_loss_patience:
+				gc.collect()
+				print(f'Engaging Early Stopping due to lack of improvement in validation loss. Best model saved at epoch {self.best_epoch} with a training loss of {self.best_train_loss} and a validation loss of {self.best_score}')
+				return True
+
+		# if the validation loss is less than the best score, reset the loss counter and use the new validation loss as the best score
 		else:
+			self.best_train_loss = train_loss
 			self.best_score = val_loss
 			self.best_epoch = epoch
+
+			# saving the best model as a checkpoint
 			self.save_checkpoint(val_loss)
 			self.loss_counter = 0
 			self.training_counter = 0
@@ -368,9 +402,23 @@ class Early_Stopping():
 			return False
 
 	def save_checkpoint(self, val_loss):
-		if self.best_loss > val_loss:
-			self.best_loss = val_loss
-			torch.save(self.model.state_dict(), f'models/non_twins_{VERSION}.pt')
+		'''
+		Function to continually save the best model.
+
+		Args:
+			val_loss (float): the validation loss for the model
+		'''
+
+		# saving the model if the validation loss is less than the best loss
+		self.best_loss = val_loss
+		print('Saving checkpoint!')
+
+		torch.save({'model': self.model.state_dict(),
+					'optimizer':self.optimizer.state_dict(),
+					'best_epoch':self.best_epoch,
+					'finished_training':False},
+					f'models/swmag_{VERSION}.pt')
+
 
 
 def fit_model(model, train, val, val_loss_patience=25, num_epochs=500):
