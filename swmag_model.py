@@ -452,7 +452,7 @@ def resume_training(model, optimizer):
 	return model, optimizer, epoch, finished_training
 
 
-def fit_autoencoder(model, train, val, val_loss_patience=25, overfit_patience=5, num_epochs=500):
+def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_epochs=500):
 
 	'''
 	_summary_: Function to train the autoencoder model.
