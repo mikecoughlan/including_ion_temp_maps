@@ -420,6 +420,35 @@ class Early_Stopping():
 					f'models/swmag_{VERSION}.pt')
 
 
+def resume_training(model, optimizer):
+	'''
+	Function to resume training of a model if it was interupted without completeing.
+
+	Args:
+		model (object): the model to be trained
+		optimizer (object): the optimizer to be used
+		pretraining (bool): whether the model is being pre-trained
+
+	Returns:
+		object: the model to be trained
+		object: the optimizer to be used
+		int: the epoch to resume training from
+	'''
+
+	try:
+		checkpoint = torch.load(f'models/autoencoder_{VERSION}.pt')
+		model.load_state_dict(checkpoint['model'])
+		optimizer.load_state_dict(checkpoint['optimizer'])
+		epoch = checkpoint['best_epoch']
+		finished_training = checkpoint['finished_training']
+	except KeyError:
+		model.load_state_dict(torch.load(f'models/autoencoder_{VERSION}.pt'))
+		optimizer = None
+		epoch = 0
+		finished_training = True
+
+	return model, optimizer, epoch, finished_training
+
 
 def fit_model(model, train, val, val_loss_patience=25, num_epochs=500):
 
