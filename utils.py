@@ -132,15 +132,15 @@ def getting_mean_lat(stations):
 
 class RegionPreprocessing():
 
-	def __init__(self, clusters=None, region=None, features=None, mean=False, std=False, maximum=False, median=False):
+	def __init__(self, cluster=None, region=None, features=None, mean=False, std=False, maximum=False, median=False):
 
-		if clusters is None:
+		if cluster is None:
 			raise ValueError('Must specify a cluster to analyze.')
 
 		if region is None:
 			raise ValueError('Must specify a region to analyze.')
 
-		self.clusters = clusters
+		self.cluster = cluster
 		self.region = region
 		self.features = features
 		self.mean = mean
@@ -242,7 +242,7 @@ class RegionPreprocessing():
 			for feature in self.features:
 				feature_dfs[feature] = pd.DataFrame(index=twins_time_period)
 
-		for stat in self.region['station']:
+		for stat in self.region['stations']:
 			df = self.loading_supermag(stat)
 			self.lons_dict[stat] = df['GEOLON'][0]
 			df = df[start_time:end_time]
@@ -287,12 +287,12 @@ class RegionPreprocessing():
 		return regional_df
 
 
-	def __call__(self, cluster, region, cluster_dict='cluster_dict.pkl'):
+	def __call__(self, cluster_dict='cluster_dict.pkl'):
 
 		with open(cluster_dict, 'rb') as f:
 			self.clusters = pickle.load(f)
 
-		self.region = self.clusters[cluster][region]
+		self.region = self.clusters[self.cluster]['regions'][self.region]
 
 		regional_df = self.combining_stations_into_regions()
 

@@ -51,8 +51,6 @@ pd.options.mode.chained_assignment = None
 
 os.environ["CDF_LIB"] = "~/CDF/lib"
 
-TARGET = 'rsd'
-REGION = 163
 RANDOM_SEED = 7
 BATCH_SIZE = 16
 
@@ -77,7 +75,9 @@ CONFIG = {'batch_size':16,
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
 
 	# loading all the datasets and dictonaries
-	RP = utils.RegionPreprocessing()
+	RP = utils.RegionPreprocessing(cluster=cluster, region=region, 
+									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
+									mean=True, std=True, maximum=True, median=True)
 
 	supermag_df = RP()
 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
@@ -92,7 +92,6 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 
 
 	return merged_df, thresholds
-
 
 
 def getting_prepared_data(target_var, cluster, region, get_features=False, do_scaling=True):
@@ -213,7 +212,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 		x_test = [scaler.transform(x) for x in x_test]
 
 	# saving the scaler
-	with open(f'models/{TARGET}/non_twins_region_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
+	with open(f'models/{TARGET}/{cluster}_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
 		pickle.dump(scaler, f)
 
 	print(f'shape of x_train: {len(x_train)}')
@@ -291,6 +290,7 @@ class CRSP(nn.Module):
 
 		return crps
 
+
 class PrintLayer(nn.Module):
 	def __init__(self):
 		super(PrintLayer, self).__init__()
@@ -300,9 +300,10 @@ class PrintLayer(nn.Module):
 		print(x.size())
 		return x
 
-class CNN(nn.Module):
+
+class SWMAG(nn.Module):
 	def __init__(self):
-		super(CNN, self).__init__()
+		super(SWMAG, self).__init__()
 		self.model = nn.Sequential(
 
 			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
@@ -319,7 +320,8 @@ class CNN(nn.Module):
 			nn.Linear(256, 128),
 			nn.ReLU(),
 			nn.Dropout(0.2),
-			nn.Linear(128, 2),
+			nn.Linear(128, 1),
+			nn.Sigmoid()
 		)
 
 	def forward(self, x):
@@ -588,7 +590,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 				# clearing the model so the best one can be loaded without overwhelming the gpu memory
 				model = None
-				model = CNN()
+				model = SWMAG()
 
 				# loading the best model version
 				final = torch.load(f'models/{VERSION}.pt')
@@ -707,17 +709,16 @@ def evaluation(model, test):
 	return np.concatenate(predicted_list, axis=0), np.concatenate(xtest_list, axis=0), np.concatenate(ytest_list, axis=0), output_lists, running_loss/len(test)
 
 
-def main():
+
+def main(target, cluster, region):
 	'''
 	Pulls all the above functions together. Outputs a saved file with the results.
 
 	'''
 	
-
-
 	# loading all data and indicies
 	print('Loading data...')
-	xtrain, xval, xtest, ytrain, yval, ytest, ___ = getting_prepared_data(target_var=TARGET, region=REGION)
+	xtrain, xval, xtest, ytrain, yval, ytest, ___ = getting_prepared_data(target_var=target, cluster=cluster, region=region)
 
 	# creating the dataloaders
 
@@ -727,20 +728,33 @@ def main():
 
 	# creating the model
 	print('Creating model....')
-	cnn = CNN()
+	swmag = SWMAG()
 
 	# fitting the model
 	print('Fitting model....')
-	cnn = fit_model(cnn, train, val, val_loss_patience=25, num_epochs=500)
+	swmag = fit_model(swmag, train, val, val_loss_patience=25, num_epochs=500)
 
 	# evaluating the model
 	print('Evaluating model....')
-	predictions, xtest, ytest, testing_loss = evaluation(cnn, test)
+	predictions, xtest, ytest, testing_loss = evaluation(swmag, test)
 
 	print(f'Loss: {testing_loss}')
 
 
 if __name__ == '__main__':
-	main()
+
+	args = argparse.ArgumentParser(description='Modeling the SWMAG data')
+	args.add_argument('--target', type=str, help='The target variable to be modeled')
+	args.add_argument('--region', type=str, help='The region to be modeled')
+	args.add_argument('--cluster', type=str, help='The cluster containing the region to be modeled')
+
+	args = args.parse_args()
+
+	TARGET = args.target
+	REGION = args.region
+	CLUSTER = args.cluster
+
+	main(target=TARGET, cluster=CLUSTER, region=REGION)
+
 	print('It ran. God job!')
 
