@@ -6,6 +6,7 @@
 ####################################################################################
 
 
+import argparse
 # Importing the libraries
 import datetime
 import gc
@@ -15,7 +16,7 @@ import os
 import pickle
 import subprocess
 import time
-import argparse
+import warnings
 
 # import keras
 import matplotlib
@@ -38,9 +39,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from spacepy import pycdf
 from torch.utils.data import DataLoader, Dataset, TensorDataset
-from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
-import warnings
+from torchvision.models.feature_extraction import (create_feature_extractor,
+                                                   get_graph_node_names)
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
+
+# Globally enabling anomaly detection
+torch.autograd.set_detect_anomaly(True)
 
 import utils
 
@@ -75,7 +80,7 @@ CONFIG = {'batch_size':16,
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
 
 	# loading all the datasets and dictonaries
-	RP = utils.RegionPreprocessing(cluster=cluster, region=region, 
+	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
 									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
 									mean=True, std=True, maximum=True, median=True)
 
@@ -114,7 +119,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	target = merged_df[f'rolling_{target_var}']
 
 	# reducing the dataframe to only the features that will be used in the model plus the target variable
-	vars_to_keep = [f'rolling_{target_var}', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+	vars_to_keep = ['dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
 					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT', 'classification']
 	merged_df = merged_df[vars_to_keep]
 
@@ -245,6 +250,21 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	print(f'Sample of y_train: {y_train[:5]}')
 
+	# checking for any nan values
+	print(f'Nan values in x_train: {np.isnan(x_train).sum()}')
+	print(f'Nan values in x_val: {np.isnan(x_val).sum()}')
+	print(f'Nan values in x_test: {np.isnan(x_test).sum()}')
+
+	print(f'Nan values in y_train: {np.isnan(y_train).sum()}')
+	print(f'Nan values in y_val: {np.isnan(y_val).sum()}')
+	print(f'Nan values in y_test: {np.isnan(y_test).sum()}')
+
+	# getting percent of the positive class in each data set
+	print(f'Percent of positive class in training data: {y_train.sum()/len(y_train)}')
+	print(f'Percent of positive class in validation data: {y_val.sum()/len(y_val)}')
+	print(f'Percent of positive class in testing data: {y_test.sum()/len(y_test)}')
+
+
 	if not get_features:
 		return torch.tensor(x_train), torch.tensor(x_val), torch.tensor(x_test), torch.tensor(y_train), torch.tensor(y_val), torch.tensor(y_test), date_dict
 	else:
@@ -271,6 +291,15 @@ class CRSP(nn.Module):
 		std = std.unsqueeze(-1)
 		y_true = y_true.unsqueeze(-1)
 
+		if torch.isnan(torch.div(1,std)).sum() > 0:
+			print('STD creating nan values')
+			print(f'STD: {std}')
+			print(f'1/std: {torch.div(1,std)}')
+			print(f'y_true: {y_true}')
+			print(f'mean: {mean}')
+
+			raise ValueError('STD creating nan values')
+
 		# calculating the error
 		crps = torch.mean(self.calculate_crps(self.epsilon_error(y_true, mean), std))
 
@@ -284,7 +313,10 @@ class CRSP(nn.Module):
 
 	def calculate_crps(self, epsilon, sig):
 
-		crps = sig * ((epsilon / sig) * torch.erf((epsilon / (np.sqrt(2) * sig))) + torch.sqrt(torch.tensor(2 / np.pi)) * torch.exp(-epsilon ** 2 / (2 * sig ** 2)) - 1 / torch.sqrt(torch.tensor(np.pi)))
+		crps = torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
+								torch.sub(torch.mul(torch.sqrt(torch.tensor(torch.div(2, np.pi))), \
+								torch.exp(-torch.div(torch.pow(epsilon, 2), (torch.mul(2, torch.pow(sig, 2)))))), \
+								torch.div(1, torch.sqrt(torch.tensor(np.pi)))))))
 
 		return crps
 
@@ -302,7 +334,7 @@ class PrintLayer(nn.Module):
 class SWMAG(nn.Module):
 	def __init__(self):
 		super(SWMAG, self).__init__()
-		
+
 		self.model = nn.Sequential(
 
 			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
@@ -320,13 +352,12 @@ class SWMAG(nn.Module):
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(128, 2),
-			nn.Sigmoid()
+			# nn.Sigmoid(),
 		)
 
 	def forward(self, x):
 
 		x = self.model(x)
-
 		return x
 
 
@@ -481,6 +512,9 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		finished_training = False
 		current_epoch = 0
 
+	if current_epoch == None:
+		current_epoch = 0
+
 	# checking to see if the model was already trained or was interupted during training
 	if not finished_training:
 
@@ -497,6 +531,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		# initalizing the early stopping class
 		early_stopping = Early_Stopping(decreasing_loss_patience=val_loss_patience)
 
+
 		# looping through the epochs
 		while current_epoch < num_epochs:
 
@@ -511,7 +546,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 			# using the training set to train the model
 			for X, y in train:
-
+				
 				# moving the data to the available device
 				X = X.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
@@ -519,6 +554,10 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				# adding a channel dimension to the data
 				X = X.unsqueeze(1)
 
+				# checking for nans
+				if (torch.isnan(X).sum() > 0) or (torch.isnan(y).sum() > 0):
+					print('Nan values in training data')
+					
 				# forward pass
 				output = model(X)
 
@@ -530,6 +569,12 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				loss.backward()
 				optimizer.step()
 
+				# checking for nans in the model weights
+				for name, param in model.named_parameters():
+					if torch.isnan(param).sum() > 0:
+						print(f'Nan values in model weights: {name}')
+						raise ValueError('Nan values in model weights')
+
 				# emptying the cuda cache
 				X = X.to('cpu')
 				y = y.to('cpu')
@@ -537,7 +582,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				# adding the loss to the running training loss
 				running_training_loss += loss.to('cpu').item()
 
-			
+
 			# setting the model to eval mode so the dropout layers are not used during validation and weights are not updated
 			model.eval()
 
@@ -712,7 +757,7 @@ def main(target, cluster, region):
 	Pulls all the above functions together. Outputs a saved file with the results.
 
 	'''
-	
+
 	# loading all data and indicies
 	print('Loading data...')
 	xtrain, xval, xtest, ytrain, yval, ytest, ___ = getting_prepared_data(target_var=target, cluster=cluster, region=region)
