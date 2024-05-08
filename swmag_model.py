@@ -292,27 +292,10 @@ class CRSP(nn.Module):
 		std = std.unsqueeze(-1)
 		y_true = y_true.unsqueeze(-1)
 
-		if torch.isnan(torch.div(1,std)).sum() > 0:
-			print('STD creating nan values')
-			print(f'STD: {std}')
-			print(f'1/std: {torch.div(1,std)}')
-			print(f'y_true: {y_true}')
-			print(f'mean: {mean}')
-
-			raise ValueError('STD creating nan values')
-
 		# calculating the error
 		crps = self.calculate_crps(self.epsilon_error(y_true, mean), std)
-		if (crps.isinf().any()) or (crps.isnan().any()):
-			print(f'CRPS: {crps}')
-			print(f'y_true: {y_true}')
-			print(f'mean: {mean}')
-			print(f'std: {std}')
-			raise ValueError('CRPS creating nan values')
 
-		crps_mean = torch.mean(crps)
-
-		return crps_mean, crps
+		return crps
 
 	def epsilon_error(self, y, u):
 
@@ -322,16 +305,10 @@ class CRSP(nn.Module):
 
 	def calculate_crps(self, epsilon, sig):
 
-		crps = torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
+		crps = torch.mean(torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
 								torch.sub(torch.mul(torch.sqrt(torch.tensor(torch.div(2, np.pi))), \
 								torch.exp(torch.div(torch.mul(-1, torch.pow(epsilon, 2)), (torch.mul(2, torch.pow(sig, 2)))))), \
-								torch.div(1, torch.sqrt(torch.tensor(np.pi)))))))
-
-		if torch.isnan(crps).sum() > 0:
-			print(f'CRPS: {crps}')
-			print(f'epsilon: {epsilon}')
-			print(f'sig: {sig}')
-			raise ValueError('CRPS creating nan values')
+								torch.div(1, torch.sqrt(torch.tensor(np.pi))))))))
 
 		return crps
 
@@ -522,7 +499,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	Returns:
 		object: the trained model
 	'''
-	optimizer = optim.Adam(model.parameters(), lr=1e-7)
+	optimizer = optim.Adam(model.parameters(), lr=1e-6)
 	# checking if the model has already been trained, loading it if it exists
 	if os.path.exists(f'models/{VERSION}.pt'):
 		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer)
@@ -582,31 +559,10 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				# calculating the loss
 				loss, checking_crps = criterion(output, y)
 
-				try:
-					# backward pass
-					optimizer.zero_grad()
-					loss.backward()
-					optimizer.step()
-
-				except:
-
-					print(f'Error in the backward pass. Loss: {loss}')
-					print(f'output: {output}')
-					print(checking_crps)
-					for name, param in model.named_parameters():
-						if torch.isnan(param).sum() > 0:
-							print(f'Nan values in model weights: {name}')
-							
-
-					raise ValueError('Error in the backward pass')
-
-
-				# checking for nans in the model weights
-				for name, param in model.named_parameters():
-					if torch.isnan(param).sum() > 0:
-						print(f'Nan values in model weights: {name}')
-						print(f'output: {output}')
-						raise ValueError('Nan values in model weights')
+				# backward pass
+				optimizer.zero_grad()
+				loss.backward()
+				optimizer.step()
 
 				# emptying the cuda cache
 				X = X.to('cpu')
