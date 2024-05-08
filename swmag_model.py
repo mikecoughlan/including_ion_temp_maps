@@ -548,16 +548,12 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 				# adding a channel dimension to the data
 				X = X.unsqueeze(1)
-
-				# checking for nans
-				if (torch.isnan(X).sum() > 0) or (torch.isnan(y).sum() > 0):
-					print('Nan values in training data')
 					
 				# forward pass
 				output = model(X)
 
 				# calculating the loss
-				loss, checking_crps = criterion(output, y)
+				loss = criterion(output, y)
 
 				# backward pass
 				optimizer.zero_grad()
@@ -592,7 +588,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 					output = model(X)
 
 					# calculating the loss
-					val_loss, ___ = criterion(output, y)
+					val_loss = criterion(output, y)
 
 					# emptying the cuda cache
 					X = X.to('cpu')
