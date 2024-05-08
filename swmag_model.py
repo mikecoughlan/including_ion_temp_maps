@@ -573,6 +573,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				for name, param in model.named_parameters():
 					if torch.isnan(param).sum() > 0:
 						print(f'Nan values in model weights: {name}')
+						print(f'output: {output}')
 						raise ValueError('Nan values in model weights')
 
 				# emptying the cuda cache
