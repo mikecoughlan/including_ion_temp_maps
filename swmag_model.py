@@ -301,9 +301,17 @@ class CRSP(nn.Module):
 			raise ValueError('STD creating nan values')
 
 		# calculating the error
-		crps = torch.mean(self.calculate_crps(self.epsilon_error(y_true, mean), std))
+		crps = self.calculate_crps(self.epsilon_error(y_true, mean), std)
+		if (crps.isinf().any()) or (crps.isnan().any()):
+			print(f'CRPS: {crps}')
+			print(f'y_true: {y_true}')
+			print(f'mean: {mean}')
+			print(f'std: {std}')
+			raise ValueError('CRPS creating nan values')
 
-		return crps
+		crps_mean = torch.mean(crps)
+
+		return crps_mean, crps
 
 	def epsilon_error(self, y, u):
 
@@ -315,8 +323,14 @@ class CRSP(nn.Module):
 
 		crps = torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
 								torch.sub(torch.mul(torch.sqrt(torch.tensor(torch.div(2, np.pi))), \
-								torch.exp(-torch.div(torch.pow(epsilon, 2), (torch.mul(2, torch.pow(sig, 2)))))), \
+								torch.exp(torch.div(torch.mul(-1, torch.pow(epsilon, 2)), (torch.mul(2, torch.pow(sig, 2)))))), \
 								torch.div(1, torch.sqrt(torch.tensor(np.pi)))))))
+
+		if torch.isnan(crps).sum() > 0:
+			print(f'CRPS: {crps}')
+			print(f'epsilon: {epsilon}')
+			print(f'sig: {sig}')
+			raise ValueError('CRPS creating nan values')
 
 		return crps
 
@@ -352,12 +366,15 @@ class SWMAG(nn.Module):
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(128, 2),
-			# nn.Sigmoid(),
+			nn.Sigmoid(),
 		)
 
 	def forward(self, x):
 
 		x = self.model(x)
+
+		# clipping to avoid values too small for backprop
+		x = torch.clamp(x, min=1e-8)
 		return x
 
 
@@ -562,7 +579,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				output = model(X)
 
 				# calculating the loss
-				loss = criterion(output, y)
+				loss, checking_crps = criterion(output, y)
 
 				try:
 					# backward pass
@@ -574,6 +591,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 					print(f'Error in the backward pass. Loss: {loss}')
 					print(f'output: {output}')
+					print(checking_crps)
 					for name, param in model.named_parameters():
 						if torch.isnan(param).sum() > 0:
 							print(f'Nan values in model weights: {name}')
@@ -617,7 +635,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 					output = model(X)
 
 					# calculating the loss
-					val_loss = criterion(output, y)
+					val_loss, ___ = criterion(output, y)
 
 					# emptying the cuda cache
 					X = X.to('cpu')
