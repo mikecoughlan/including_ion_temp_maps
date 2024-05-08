@@ -564,10 +564,23 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				# calculating the loss
 				loss = criterion(output, y)
 
-				# backward pass
-				optimizer.zero_grad()
-				loss.backward()
-				optimizer.step()
+				try:
+					# backward pass
+					optimizer.zero_grad()
+					loss.backward()
+					optimizer.step()
+
+				except:
+
+					print(f'Error in the backward pass. Loss: {loss}')
+					print(f'output: {output}')
+					for name, param in model.named_parameters():
+						if torch.isnan(param).sum() > 0:
+							print(f'Nan values in model weights: {name}')
+							
+
+					raise ValueError('Error in the backward pass')
+
 
 				# checking for nans in the model weights
 				for name, param in model.named_parameters():
