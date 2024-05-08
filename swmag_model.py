@@ -34,6 +34,7 @@ import torchvision
 import torchvision.transforms as transforms
 import tqdm
 from scipy.stats import boxcox
+from torchsummary import summary
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -794,6 +795,8 @@ def main(target, cluster, region):
 	print('Loading data...')
 	xtrain, xval, xtest, ytrain, yval, ytest, ___ = getting_prepared_data(target_var=target, cluster=cluster, region=region)
 
+	train_size = list(xtrain.size())
+
 	# creating the dataloaders
 
 	train = DataLoader(list(zip(xtrain, ytrain)), batch_size=BATCH_SIZE, shuffle=True)
@@ -803,6 +806,10 @@ def main(target, cluster, region):
 	# creating the model
 	print('Creating model....')
 	swmag = SWMAG()
+
+	# printing model summary
+	swmag.to(DEVICE)
+	print(summary(swmag, (1, train_size[1], train_size[2])))
 
 	# fitting the model
 	print('Fitting model....')
