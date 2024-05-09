@@ -134,7 +134,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# if not, calculating the twins maps and extracting the storms
 	else:
-		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False)
+		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False, classification=True)
 		storms_extracted_dict = {'storms':storms, 'target':target}
 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
@@ -145,8 +145,6 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	# getting the feature names
 	features = storms[0].columns
 	# target = torch.nn.functional.one_hot(tensor=torch.tensor(target), num_classes=2)
-
-	print(f'target: {target}')
 
 	# splitting the data on a day to day basis to reduce data leakage
 	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2017-12-01'), freq='D')
@@ -351,7 +349,7 @@ class SWMAG(nn.Module):
 			nn.Dropout(0.2),
 			nn.Linear(128, 2),
 			# nn.Sigmoid(),
-			nn.Softmax()
+			nn.Softmax(dim=1)
 		)
 
 	def forward(self, x):
@@ -596,7 +594,11 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				with torch.no_grad():
 
 					output = model(X)
-					output = output.view(len(output))
+					print(f'output before: {output}')
+					output = output.squeeze()
+					print(f'output after: {output}')
+					raise
+					# output = output.view(len(output))
 					# output = torch.tensor(output)
 					# try:
 					# 	# calculating the loss

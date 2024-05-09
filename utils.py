@@ -522,6 +522,8 @@ def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=F
 	storm_list['etime'] = etime
 
 	storm_list = pd.DataFrame({'stime':stime, 'etime':etime})
+	if classification:
+		ohe = OneHotEncoder().fit(np.array([0,1]).reshape(-1,1))
 
 
 	for start, end in zip(storm_list['stime'], storm_list['etime']):		# looping through the storms to remove the data from the larger df
@@ -532,10 +534,11 @@ def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=F
 		if len(storm) != 0:
 			if target:
 				if classification:
-					y.append(pd.get_dummies(storm[target_var], dtype='int64').to_numpy())
+					y.append(ohe.transform(storm[target_var].values.reshape(-1,1)).toarray())	
+
 				else:
 					y.append(storm[target_var].values)
-					
+
 				storm.drop(target_var, axis=1, inplace=True)
 				storms.append(storm)
 			else:
@@ -585,7 +588,7 @@ def split_sequences(sequences, targets=None, n_steps=30, include_target=True, da
 						index_to_drop += 1
 					continue
 				if model_type == 'classification':
-					if np.isnan(target[end_ix, :]):
+					if np.isnan(target[end_ix, :]).any():
 						to_drop.append(index_to_drop)
 						index_to_drop += 1
 						continue
@@ -603,6 +606,5 @@ def split_sequences(sequences, targets=None, n_steps=30, include_target=True, da
 			if maps is not None:
 				twins_maps.append(twins)
 			index_to_drop += 1
-
 
 	return np.array(X), np.array(y), to_drop, np.array(twins_maps)
