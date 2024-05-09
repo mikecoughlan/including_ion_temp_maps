@@ -59,8 +59,9 @@ os.environ["CDF_LIB"] = "~/CDF/lib"
 
 RANDOM_SEED = 42
 BATCH_SIZE = 16
+TIME_HISTORY = 30
 
-VERSION = 'swmag_v0'
+VERSION = 'swmag_v1'
 
 working_dir = '../../../../data/mike_working_dir/'
 region_path = working_dir+'identifying_regions_data/adjusted_regions.pkl'
@@ -72,10 +73,6 @@ rsd_path = working_dir+'identifying_regions_data/twins_era_stats_dict_radius_reg
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {DEVICE}')
-
-CONFIG = {'batch_size':16,
-			'time_history':30,
-			'random_seed':42}
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -126,9 +123,11 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	print('Columns in Merged Dataframe: '+str(merged_df.columns))
 
+	temp_version = 'swmag_v1'
+
 	# loading the data corresponding to the twins maps if it has already been calculated
-	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
+	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl'):
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl', 'rb') as f:
 			storms_extracted_dict = pickle.load(f)
 		storms = storms_extracted_dict['storms']
 		target = storms_extracted_dict['target']
@@ -137,7 +136,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	else:
 		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False)
 		storms_extracted_dict = {'storms':storms, 'target':target}
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
 
 	# making sure the target variable has been dropped from the input data
@@ -145,14 +144,17 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# getting the feature names
 	features = storms[0].columns
+	# target = torch.nn.functional.one_hot(tensor=torch.tensor(target), num_classes=2)
+
+	print(f'target: {target}')
 
 	# splitting the data on a day to day basis to reduce data leakage
 	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2017-12-01'), freq='D')
 	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
 	day_df = day_df.drop(specific_test_days)
 
-	train_days, test_days = train_test_split(day_df, test_size=0.1, shuffle=True, random_state=CONFIG['random_seed'])
-	train_days, val_days = train_test_split(train_days, test_size=0.125, shuffle=True, random_state=CONFIG['random_seed'])
+	train_days, test_days = train_test_split(day_df, test_size=0.1, shuffle=True, random_state=RANDOM_SEED)
+	train_days, val_days = train_test_split(train_days, test_size=0.125, shuffle=True, random_state=RANDOM_SEED)
 
 	test_days = test_days.tolist()
 	# adding the two dateimte values of interest to the test days df
@@ -226,9 +228,9 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_test: {len(x_test)}')
 
 	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression')
-	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression')
-	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression')
+	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=TIME_HISTORY, dates=date_dict['train'], model_type='classification')
+	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=TIME_HISTORY, dates=date_dict['val'], model_type='classification')
+	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=TIME_HISTORY, dates=date_dict['test'], model_type='classification')
 
 	# dropping the dates that correspond to arrays that would have had nan values
 	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
@@ -347,8 +349,9 @@ class SWMAG(nn.Module):
 			nn.Linear(256, 128),
 			nn.ReLU(),
 			nn.Dropout(0.2),
-			nn.Linear(128, 1),
-			nn.Sigmoid(),
+			nn.Linear(128, 2),
+			# nn.Sigmoid(),
+			nn.Softmax()
 		)
 
 	def forward(self, x):
@@ -356,7 +359,7 @@ class SWMAG(nn.Module):
 		x = self.model(x)
 
 		# clipping to avoid values too small for backprop
-		x = torch.clamp(x, min=1e-9)
+		# x = torch.clamp(x, min=1e-9)
 
 		return x
 
@@ -504,7 +507,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	Returns:
 		object: the trained model
 	'''
-	optimizer = optim.Adam(model.parameters(), lr=1e-6)
+	optimizer = optim.Adam(model.parameters(), lr=1e-7)
 	# checking if the model has already been trained, loading it if it exists
 	if os.path.exists(f'models/{VERSION}.pt'):
 		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer)
@@ -527,7 +530,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		# defining the loss function and the optimizer
 		# criterion = CRSP()
 		criterion = nn.BCELoss()
-		optimizer = optim.Adam(model.parameters(), lr=1e-6)
+		optimizer = optim.Adam(model.parameters(), lr=1e-7)
 
 		# initalizing the early stopping class
 		early_stopping = Early_Stopping(decreasing_loss_patience=val_loss_patience)
@@ -707,14 +710,14 @@ def evaluation(model, test):
 	# making sure the model is on the correct device
 	model.to(DEVICE, dtype=torch.float)
 
-	# layers = {"Conv2d-1":"conv1",
-	# 		"Conv2d-5":"conv2",
-	# 		"Linear-9":"fc1",
-	# 		"Linear-12":"fc2",
-	# 		"Linear-15":"fc3",
-	# 		"Linear-18":"fc4"}
+	layers = {"model.1":"conv1",
+			"model.5":"conv2",
+			"model.9":"fc1",
+			"model.12":"fc2",
+			"model.15":"fc3",
+			"model.18":"fc4"}
 
-	# # print(torch.get_graph_node_names(model, input_names=True, output_names=True))
+	print(get_graph_node_names(model))
 
 	output_lists = {layer:[] for layer in layers.values()}
 
@@ -731,10 +734,10 @@ def evaluation(model, test):
 			loss = F.mse_loss(predicted[[0]], y)
 			running_loss += loss.item()
 
-			# model_layers = create_feature_extractor(model, return_nodes=layers)
-			# intermediate_layers = model_layers(x)
-			# for layer in layers.values():
-			# 	output_lists[layer].append(intermediate_layers[layer].to('cpu').numpy())
+			model_layers = create_feature_extractor(model, return_nodes=layers)
+			intermediate_layers = model_layers(x)
+			for layer in layers.values():
+				output_lists[layer].append(intermediate_layers[layer].to('cpu').numpy())
 
 			# making sure the predicted value is on the cpu
 			if predicted.get_device() != -1:
@@ -751,6 +754,9 @@ def evaluation(model, test):
 			predicted_list.append(predicted)
 			xtest_list.append(x)
 			ytest_list.append(y)
+
+		for layer in output_lists.keys():
+			output_lists[layer] = np.concatenate(output_lists[layer], axis=0)
 
 	return np.concatenate(predicted_list, axis=0), np.concatenate(xtest_list, axis=0), np.concatenate(ytest_list, axis=0), output_lists, running_loss/len(test)
 
@@ -777,6 +783,25 @@ def plotting_results(predictions, ytest, target_var, cluster, region):
 	axes.set_ylabel('Predicted')
 	axes.set_title(f'{target_var} Predictions vs True Values')
 	plt.savefig(f'plots/{VERSION}_{target_var}_{cluster}_{region}_predictions_vs_true.png')
+
+
+	# plotting predictions histograms
+	fig, axes = plt.subplots(1,1, figsize=(10,10))
+	axes.hist(predictions, bins=100, color='blue', alpha=0.5, label='Predictions')
+	axes.set_title(f'{target_var} Predictions Histogram')
+	axes.set_xlabel('Predictions')
+	axes.set_ylabel('Frequency')
+	plt.savefig(f'plots/{VERSION}_{target_var}_{cluster}_{region}_predictions_histogram.png')
+
+
+def plotting_histograms_for_each_layer_output(outputs, labels, target_var, cluster, region):
+
+	fig, axes = plt.subplots(len(outputs.keys()), 1, figsize=(20, 20))
+	for ax, label, output in zip(axes, labels.keys(), outputs.values()):
+		ax.hist(output.flatten(), bins=100, alpha=0.5, log=True)
+		ax.set_title(f'Layer {label}')
+
+	plt.savefig(f'plots/{VERSION}_{target_var}_{cluster}_{region}_layer_outputs.png')
 
 
 def main(target, cluster, region):
@@ -822,6 +847,16 @@ def main(target, cluster, region):
 	plotting_results(predictions, ytest, target_var=target, cluster=cluster, region=region)
 
 	print(f'Loss: {testing_loss}')
+
+	layers = {"model.1":"conv1",
+			"model.5":"conv2",
+			"model.9":"fc1",
+			"model.12":"fc2",
+			"model.15":"fc3",
+			"model.18":"fc4"}
+
+	# plotting the histograms for each layer output
+	plotting_histograms_for_each_layer_output(output_list, labels=layers, target_var=target, cluster=cluster, region=region)
 
 
 if __name__ == '__main__':

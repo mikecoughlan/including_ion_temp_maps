@@ -18,7 +18,7 @@ from matplotlib.collections import PatchCollection
 from matplotlib.colors import Normalize
 from matplotlib.patches import Circle, Wedge
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, OneHotEncoder
 from spacepy import pycdf
 from tqdm import tqdm
 
@@ -462,7 +462,7 @@ def classification_column(df, param, thresh, forecast, window):
 
 
 
-def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=False, target_var=None, concat=False, map_keys=None):
+def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=False, target_var=None, concat=False, map_keys=None, classification=False):
 
 	'''
 	Pulling out storms using a defined list of datetime strings, adding a lead and recovery time to it and
@@ -531,7 +531,11 @@ def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=F
 
 		if len(storm) != 0:
 			if target:
-				y.append(storm[target_var].values)
+				if classification:
+					y.append(pd.get_dummies(storm[target_var], dtype='int64').to_numpy())
+				else:
+					y.append(storm[target_var].values)
+					
 				storm.drop(target_var, axis=1, inplace=True)
 				storms.append(storm)
 			else:
