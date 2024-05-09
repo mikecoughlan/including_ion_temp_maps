@@ -261,9 +261,9 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'Nan values in y_test: {np.isnan(y_test).sum()}')
 
 	# getting percent of the positive class in each data set
-	print(f'Percent of positive class in training data: {y_train.sum()/len(y_train)}')
-	print(f'Percent of positive class in validation data: {y_val.sum()/len(y_val)}')
-	print(f'Percent of positive class in testing data: {y_test.sum()/len(y_test)}')
+	print(f'Percent of positive class in training data: {y_train[:,1].sum()/len(y_train)}')
+	print(f'Percent of positive class in validation data: {y_val[:,1].sum()/len(y_val)}')
+	print(f'Percent of positive class in testing data: {y_test[:,1].sum()/len(y_test)}')
 
 
 	if not get_features:
@@ -594,17 +594,11 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				with torch.no_grad():
 
 					output = model(X)
-					print(f'output shape before squeeze: {output.shape}')
-					output = output.squeeze()
-					print(f'output shape after squeeze: {output.shape}')
 					output = output.view(len(output),2)
-					print(f'output shape after view: {output.shape}')
 					# output = torch.tensor(output)
 					# try:
 					# 	# calculating the loss
 					val_loss = criterion(output, y)
-
-					raise
 
 					# except ValueError:
 					# 	new_output = model(X)
@@ -777,6 +771,11 @@ def plotting_results(predictions, ytest, target_var, cluster, region):
 		region (str): the region being modeled
 
 	'''
+
+	if predictions.shape[1] > 1:
+		predictions = predictions[:,1]
+	if ytest.shape[1] > 1:
+		ytest = ytest[:,1]
 
 	fig,axes = plt.subplots(1,1, figsize=(10,10))
 
