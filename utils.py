@@ -189,7 +189,9 @@ class RegionPreprocessing():
 		# creating the shifted parameter column
 		thresh = df[param].quantile(percentile)
 
-		df[f'shifted_{param}'] = df[param].shift(-forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
+		print(f'Threshold: {thresh}')
+
+		df[f'shifted_{param}'] = df[f'rolling_{param}'].shift(-forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
 
 		if window > 0:																				# index, the shift time is the negative of the forecast instead of positive.
 			indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window)			# Yeah this is annoying, have to create a forward rolling indexer because it won't do it automatically.
@@ -324,10 +326,19 @@ class RegionPreprocessing():
 		regional_df['cosMLT'] = np.cos(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 		regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 
+		print('before:')
+		print(regional_df)
+
 		regional_df = self.classification_column(df=regional_df, param='rsd')
+
+		print('after:')
+		print(regional_df)
 
 		if map_keys is not None:
 			regional_df = regional_df[regional_df.index.isin(map_keys)]
+		
+		print('final:')
+		print(regional_df)
 
 		return regional_df
 

@@ -57,7 +57,7 @@ pd.options.mode.chained_assignment = None
 
 os.environ["CDF_LIB"] = "~/CDF/lib"
 
-RANDOM_SEED = 7
+RANDOM_SEED = 42
 BATCH_SIZE = 16
 
 VERSION = 'swmag_v0'
@@ -75,7 +75,7 @@ print(f'Device: {DEVICE}')
 
 CONFIG = {'batch_size':16,
 			'time_history':30,
-			'random_seed':7}
+			'random_seed':42}
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -293,7 +293,7 @@ class CRSP(nn.Module):
 		y_true = y_true.unsqueeze(-1)
 
 		# calculating the error
-		crps = self.calculate_crps(self.epsilon_error(y_true, mean), std)
+		crps = torch.mean(self.calculate_crps(self.epsilon_error(y_true, mean), std))
 
 		return crps
 
@@ -305,10 +305,11 @@ class CRSP(nn.Module):
 
 	def calculate_crps(self, epsilon, sig):
 
-		crps = torch.mean(torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
-								torch.sub(torch.mul(torch.sqrt(torch.tensor(torch.div(2, np.pi))), \
-								torch.exp(torch.div(torch.mul(-1, torch.pow(epsilon, 2)), (torch.mul(2, torch.pow(sig, 2)))))), \
-								torch.div(1, torch.sqrt(torch.tensor(np.pi))))))))
+		crps = torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
+								torch.sub(torch.mul(torch.sqrt(torch.div(2, np.pi)), torch.exp(torch.div(torch.mul(-1, torch.pow(epsilon, 2)), \
+								(torch.mul(2, torch.pow(sig, 2)))))), torch.div(1, torch.sqrt(torch.tensor(np.pi)))))))
+
+		# crps = sig * ((epsilon / sig) * torch.erf((epsilon / (np.sqrt(2) * sig))) + torch.sqrt(torch.tensor(2 / np.pi)) * torch.exp(-epsilon ** 2 / (2 * sig ** 2)) - 1 / torch.sqrt(torch.tensor(np.pi)))
 
 		return crps
 
@@ -329,21 +330,24 @@ class SWMAG(nn.Module):
 
 		self.model = nn.Sequential(
 
-			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
+			nn.Conv2d(in_channels=1, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.MaxPool2d(kernel_size=2, stride=2),
-			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
+			nn.Conv2d(in_channels=256, out_channels=512, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Flatten(),
-			nn.Linear(256*15*7, 256),
+			nn.Linear(512*15*7, 512),
+			nn.ReLU(),
+			nn.Dropout(0.2),
+			nn.Linear(512, 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
 			nn.ReLU(),
 			nn.Dropout(0.2),
-			nn.Linear(128, 2),
+			nn.Linear(128, 1),
 			nn.Sigmoid(),
 		)
 
@@ -352,7 +356,8 @@ class SWMAG(nn.Module):
 		x = self.model(x)
 
 		# clipping to avoid values too small for backprop
-		x = torch.clamp(x, min=1e-8)
+		x = torch.clamp(x, min=1e-9)
+
 		return x
 
 
@@ -395,7 +400,7 @@ class Early_Stopping():
 		'''
 
 		# using the absolute value of the loss for negatively orientied loss functions
-		val_loss = abs(val_loss)
+		# val_loss = abs(val_loss)
 
 		# initializing the best score if it is not already
 		self.model = model
@@ -507,7 +512,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		finished_training = False
 		current_epoch = 0
 
-	if current_epoch == None:
+	if current_epoch is None:
 		current_epoch = 0
 
 	# checking to see if the model was already trained or was interupted during training
@@ -520,8 +525,9 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		model.to(DEVICE)
 
 		# defining the loss function and the optimizer
-		criterion = CRSP()
-		optimizer = optim.Adam(model.parameters(), lr=1e-7)
+		# criterion = CRSP()
+		criterion = nn.BCELoss()
+		optimizer = optim.Adam(model.parameters(), lr=1e-6)
 
 		# initalizing the early stopping class
 		early_stopping = Early_Stopping(decreasing_loss_patience=val_loss_patience)
@@ -551,6 +557,8 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 					
 				# forward pass
 				output = model(X)
+
+				output = output.squeeze()
 
 				# calculating the loss
 				loss = criterion(output, y)
@@ -587,8 +595,17 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 					output = model(X)
 
-					# calculating the loss
-					val_loss = criterion(output, y)
+					output = output.squeeze()
+
+					try:
+						# calculating the loss
+						val_loss = criterion(output, y)
+
+					except ValueError:
+						print('Value Error')
+						print(f'Output: {output}')
+						print(f'y: {y}')
+						print(f'X: {X}')
 
 					# emptying the cuda cache
 					X = X.to('cpu')
@@ -757,6 +774,10 @@ def main(target, cluster, region):
 
 	# creating the model
 	print('Creating model....')
+
+	# setting random seed
+	torch.manual_seed(RANDOM_SEED)
+	torch.cuda.manual_seed(RANDOM_SEED)
 	swmag = SWMAG()
 
 	# printing model summary
