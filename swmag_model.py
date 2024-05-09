@@ -594,15 +594,17 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				with torch.no_grad():
 
 					output = model(X)
-					print(f'output before: {output}')
+					print(f'output shape before squeeze: {output.shape}')
 					output = output.squeeze()
-					print(f'output after: {output}')
-					raise
-					# output = output.view(len(output))
+					print(f'output shape after squeeze: {output.shape}')
+					output = output.view(len(output),2)
+					print(f'output shape after view: {output.shape}')
 					# output = torch.tensor(output)
 					# try:
 					# 	# calculating the loss
 					val_loss = criterion(output, y)
+
+					raise
 
 					# except ValueError:
 					# 	new_output = model(X)

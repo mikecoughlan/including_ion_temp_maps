@@ -326,19 +326,10 @@ class RegionPreprocessing():
 		regional_df['cosMLT'] = np.cos(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 		regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 
-		print('before:')
-		print(regional_df)
-
 		regional_df = self.classification_column(df=regional_df, param='rsd')
-
-		print('after:')
-		print(regional_df)
 
 		if map_keys is not None:
 			regional_df = regional_df[regional_df.index.isin(map_keys)]
-		
-		print('final:')
-		print(regional_df)
 
 		return regional_df
 
