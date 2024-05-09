@@ -220,7 +220,7 @@ class RegionPreprocessing():
 
 	def getting_dbdt_dataframe(self):
 
-		dbdt_df = pd.DataFrame(index=pd.date_range(start='2009-07-20', end='2017-12-31', freq='min'))
+		dbdt_df = pd.DataFrame(index=pd.date_range(start='2009-07-20', end='2017-12-31 23:59:00', freq='min'))
 		for station in self.region['stations']:
 			# loading the station data
 			station_df = pd.read_feather(supermag_dir + station + '.feather')

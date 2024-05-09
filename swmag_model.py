@@ -554,7 +554,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 				# adding a channel dimension to the data
 				X = X.unsqueeze(1)
-					
+
 				# forward pass
 				output = model(X)
 
@@ -562,7 +562,6 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 				# calculating the loss
 				loss = criterion(output, y)
-
 				# backward pass
 				optimizer.zero_grad()
 				loss.backward()
@@ -594,18 +593,22 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				with torch.no_grad():
 
 					output = model(X)
+					output = output.view(len(output))
+					# output = torch.tensor(output)
+					# try:
+					# 	# calculating the loss
+					val_loss = criterion(output, y)
 
-					output = output.squeeze()
-
-					try:
-						# calculating the loss
-						val_loss = criterion(output, y)
-
-					except ValueError:
-						print('Value Error')
-						print(f'Output: {output}')
-						print(f'y: {y}')
-						print(f'X: {X}')
+					# except ValueError:
+					# 	new_output = model(X)
+					# 	new_output = new_output.view(1)
+					# 	print('Value Error')
+					# 	print(f'Output: {new_output}')
+					# 	print(f'Output: {new_output.shape}')
+					# 	print(f'y: {y}')
+					# 	print(f'y: {y.shape}')
+					# 	val_loss = criterion(new_output, y)
+					# 	print(f'Val Loss: {val_loss}')
 
 					# emptying the cuda cache
 					X = X.to('cpu')
@@ -704,15 +707,14 @@ def evaluation(model, test):
 	# making sure the model is on the correct device
 	model.to(DEVICE, dtype=torch.float)
 
-	layers = {"encoder.1":"conv1",
-			"encoder.4":"conv2",
-			"encoder.7":"conv3",
-			"encoder.10":"fc1",
-			"decoder.0":"fc2",
-			"decoder.2":"deconv1",
-			"decoder.4":"deconv2",
-			"decoder.6":"deconv3",
-			"decoder.8":"deconv4"}
+	# layers = {"Conv2d-1":"conv1",
+	# 		"Conv2d-5":"conv2",
+	# 		"Linear-9":"fc1",
+	# 		"Linear-12":"fc2",
+	# 		"Linear-15":"fc3",
+	# 		"Linear-18":"fc4"}
+
+	# # print(torch.get_graph_node_names(model, input_names=True, output_names=True))
 
 	output_lists = {layer:[] for layer in layers.values()}
 
@@ -729,10 +731,10 @@ def evaluation(model, test):
 			loss = F.mse_loss(predicted[[0]], y)
 			running_loss += loss.item()
 
-			model_layers = create_feature_extractor(model, return_nodes=layers)
-			intermediate_layers = model_layers(x)
-			for layer in layers.values():
-				output_lists[layer].append(intermediate_layers[layer].to('cpu').numpy())
+			# model_layers = create_feature_extractor(model, return_nodes=layers)
+			# intermediate_layers = model_layers(x)
+			# for layer in layers.values():
+			# 	output_lists[layer].append(intermediate_layers[layer].to('cpu').numpy())
 
 			# making sure the predicted value is on the cpu
 			if predicted.get_device() != -1:
@@ -752,6 +754,29 @@ def evaluation(model, test):
 
 	return np.concatenate(predicted_list, axis=0), np.concatenate(xtest_list, axis=0), np.concatenate(ytest_list, axis=0), output_lists, running_loss/len(test)
 
+def plotting_results(predictions, ytest, target_var, cluster, region):
+
+	'''
+	Function to plot the results of the model.
+
+	Args:
+		predictions (np.array): the predictions from the model
+		ytest (np.array): the testing targets for the model
+		target_var (str): the target variable being modeled
+		cluster (str): the cluster being modeled
+		region (str): the region being modeled
+
+	'''
+
+	fig,axes = plt.subplots(1,1, figsize=(10,10))
+
+	# plotting the simple predictions vs test
+	axes.scatter(ytest, predictions, color='blue')
+	axes.plot([ytest.min(), ytest.max()], [ytest.min(), ytest.max()], 'k--', lw=4)
+	axes.set_xlabel('True')
+	axes.set_ylabel('Predicted')
+	axes.set_title(f'{target_var} Predictions vs True Values')
+	plt.savefig(f'plots/{VERSION}_{target_var}_{cluster}_{region}_predictions_vs_true.png')
 
 
 def main(target, cluster, region):
@@ -790,7 +815,11 @@ def main(target, cluster, region):
 
 	# evaluating the model
 	print('Evaluating model....')
-	predictions, xtest, ytest, testing_loss = evaluation(swmag, test)
+	predictions, xtest, ytest, output_list, testing_loss = evaluation(swmag, test)
+
+	# plotting the results
+	print('Plotting results....')
+	plotting_results(predictions, ytest, target_var=target, cluster=cluster, region=region)
 
 	print(f'Loss: {testing_loss}')
 
