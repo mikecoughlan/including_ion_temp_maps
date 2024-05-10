@@ -191,7 +191,7 @@ class RegionPreprocessing():
 
 		print(f'Threshold: {thresh}')
 
-		df[f'shifted_{param}'] = df[f'rolling_{param}'].shift(-forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
+		df[f'shifted_{param}'] = df[param].shift(-forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
 
 		if window > 0:																				# index, the shift time is the negative of the forecast instead of positive.
 			indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window)			# Yeah this is annoying, have to create a forward rolling indexer because it won't do it automatically.
@@ -334,7 +334,9 @@ class RegionPreprocessing():
 		return regional_df
 
 
-	def __call__(self, cluster_dict='cluster_dict.pkl'):
+	def __call__(self, cluster_dict='cluster_dict.pkl', **kwargs):
+
+		self.__dict__.update(kwargs)
 
 		with open(cluster_dict, 'rb') as f:
 			self.clusters = pickle.load(f)

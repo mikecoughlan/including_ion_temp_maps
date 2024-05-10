@@ -114,7 +114,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	merged_df, thresholds = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
 
 	# target = merged_df['classification']
-	target = merged_df[f'rolling_{target_var}']
+	target = merged_df[target_var]
 
 	# reducing the dataframe to only the features that will be used in the model plus the target variable
 	vars_to_keep = ['dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
@@ -123,7 +123,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	print('Columns in Merged Dataframe: '+str(merged_df.columns))
 
-	temp_version = 'swmag_v1'
+	temp_version = 'swmag_v2'
 
 	# loading the data corresponding to the twins maps if it has already been calculated
 	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl'):
