@@ -127,7 +127,7 @@ def getting_mean_lat(stations):
 
 class RegionPreprocessing():
 
-	def __init__(self, cluster=None, region=None, features=None, mean=False, std=False, maximum=False, median=False):
+	def __init__(self, cluster=None, region=None, features=None, mean=False, std=False, maximum=False, median=False, **kwargs):
 
 		if cluster is None:
 			raise ValueError('Must specify a cluster to analyze.')
@@ -142,6 +142,17 @@ class RegionPreprocessing():
 		self.std = std
 		self.maximum = maximum
 		self.median = median
+
+		self.__dict__.update(kwargs)
+		print(self.__dict__)
+		self.forecast = self.__dict__.get('forecast', 15)
+		self.window = self.__dict__.get('window', 15)
+		self.classification = self.__dict__.get('classification', False)
+
+		print(self.__dict__)
+
+		print(f'Forecast: {self.forecast}, Window: {self.window}, Classification: {self.classification}')
+
 
 
 	def loading_supermag(self, station):
@@ -189,7 +200,7 @@ class RegionPreprocessing():
 		# creating the shifted parameter column
 		thresh = df[param].quantile(percentile)
 
-		print(f'Threshold: {thresh}')
+		# print(f'Threshold: {thresh}')
 
 		df[f'shifted_{param}'] = df[param].shift(-forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
 
@@ -289,7 +300,7 @@ class RegionPreprocessing():
 
 		for stat in self.region['stations']:
 			df = self.loading_supermag(stat)
-			self.lons_dict[stat] = df['GEOLON'].iloc[0]
+			self.lons_dict[stat] = df['GEOLON'].loc[df['GEOLON'].first_valid_index()]
 			df = df[start_time:end_time]
 			self.mlt_df[stat] = df['MLT']
 			if self.features is not None:
@@ -316,7 +327,6 @@ class RegionPreprocessing():
 						regional_df[f'{feature}_median'] = feature_dfs[feature].median(axis=1)
 
 		indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=15)
-
 		mlt = self.finding_mlt()
 		rsd = self.calculating_rsd()
 
@@ -326,7 +336,9 @@ class RegionPreprocessing():
 		regional_df['cosMLT'] = np.cos(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 		regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 
-		regional_df = self.classification_column(df=regional_df, param='rsd', forecast=1, window=15, percentile=0.99)
+		if self.classification:
+
+			regional_df = self.classification_column(df=regional_df, param='rsd', percentile=0.99)
 
 		if map_keys is not None:
 			regional_df = regional_df[regional_df.index.isin(map_keys)]
@@ -335,8 +347,6 @@ class RegionPreprocessing():
 
 
 	def __call__(self, cluster_dict='cluster_dict.pkl', **kwargs):
-
-		self.__dict__.update(kwargs)
 
 		with open(cluster_dict, 'rb') as f:
 			self.clusters = pickle.load(f)

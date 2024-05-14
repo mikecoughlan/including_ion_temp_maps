@@ -121,7 +121,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT', 'classification']
 	merged_df = merged_df[vars_to_keep]
 
-	print('Columns in Merged Dataframe: '+str(merged_df.columns))
+	print(f'Columns in Merged Dataframe: {merged_df.columns}')
 
 	temp_version = 'swmag_v2'
 
@@ -144,7 +144,6 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# getting the feature names
 	features = storms[0].columns
-	# target = torch.nn.functional.one_hot(tensor=torch.tensor(target), num_classes=2)
 
 	# splitting the data on a day to day basis to reduce data leakage
 	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2017-12-01'), freq='D')
@@ -225,10 +224,12 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_val: {len(x_val)}')
 	print(f'shape of x_test: {len(x_test)}')
 
+	model_type = 'classification'
+
 	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=TIME_HISTORY, dates=date_dict['train'], model_type='classification')
-	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=TIME_HISTORY, dates=date_dict['val'], model_type='classification')
-	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=TIME_HISTORY, dates=date_dict['test'], model_type='classification')
+	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=TIME_HISTORY, dates=date_dict['train'], model_type=model_type)
+	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=TIME_HISTORY, dates=date_dict['val'], model_type=model_type)
+	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=TIME_HISTORY, dates=date_dict['test'], model_type=model_type)
 
 	# dropping the dates that correspond to arrays that would have had nan values
 	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
