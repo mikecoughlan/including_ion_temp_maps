@@ -140,6 +140,11 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
 
+
+	temp_target = np.concatenate(target, axis=0)
+	print(f'perctange of positive nodes in target: {temp_target[:,1].sum()/len(temp_target)}')
+	raise
+
 	# making sure the target variable has been dropped from the input data
 	print('Columns in Dataframe: '+str(storms[0].columns))
 

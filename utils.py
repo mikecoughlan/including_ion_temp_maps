@@ -202,10 +202,10 @@ class RegionPreprocessing():
 
 		# print(f'Threshold: {thresh}')
 
-		df[f'shifted_{param}'] = df[param].shift(-forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
+		df[f'shifted_{param}'] = df[param].shift(-self.forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
 
 		if window > 0:																				# index, the shift time is the negative of the forecast instead of positive.
-			indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window)			# Yeah this is annoying, have to create a forward rolling indexer because it won't do it automatically.
+			indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=self.window)			# Yeah this is annoying, have to create a forward rolling indexer because it won't do it automatically.
 			df['window_max'] = df[f'shifted_{param}'].rolling(indexer, min_periods=1).max()		# creates new column in the df labeling the maximum parameter value in the forecast:forecast+window time frame
 		# df['pers_max'] = df[param].rolling(0, min_periods=1).max()						# looks backwards to find the max param value in the time history limit
 		else:
