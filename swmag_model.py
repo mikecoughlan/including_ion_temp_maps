@@ -61,7 +61,7 @@ RANDOM_SEED = 42
 BATCH_SIZE = 16
 TIME_HISTORY = 30
 
-VERSION = 'swmag_v2'
+VERSION = 'swmag_v3'
 
 working_dir = '../../../../data/mike_working_dir/'
 region_path = working_dir+'identifying_regions_data/adjusted_regions.pkl'
@@ -80,7 +80,8 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 	# loading all the datasets and dictonaries
 	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
 									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
-									mean=True, std=True, maximum=True, median=True)
+									mean=True, std=True, maximum=True, median=True,
+									forecast=1, window=30, classification=True)
 
 	supermag_df = RP()
 
@@ -123,11 +124,11 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	print(f'Columns in Merged Dataframe: {merged_df.columns}')
 
-	temp_version = 'swmag_v2'
+	# temp_version = 'swmag_v3'
 
 	# loading the data corresponding to the twins maps if it has already been calculated
-	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl'):
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl', 'rb') as f:
+	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
 			storms_extracted_dict = pickle.load(f)
 		storms = storms_extracted_dict['storms']
 		target = storms_extracted_dict['target']
@@ -136,7 +137,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	else:
 		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False, classification=True)
 		storms_extracted_dict = {'storms':storms, 'target':target}
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{temp_version}.pkl', 'wb') as f:
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
 
 	# making sure the target variable has been dropped from the input data
