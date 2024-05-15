@@ -61,7 +61,7 @@ RANDOM_SEED = 42
 BATCH_SIZE = 16
 TIME_HISTORY = 30
 
-VERSION = 'swmag_v3'
+VERSION = 'swmag_v4'
 
 working_dir = '../../../../data/mike_working_dir/'
 region_path = working_dir+'identifying_regions_data/adjusted_regions.pkl'
