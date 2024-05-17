@@ -1,0 +1,14 @@
+
+#!/bin/bash
+
+# defining a list of the region numbers to loop through
+
+# Loop through regions and run non_twins_modeling_final_version for each one
+python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-0'
+python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-1'
+python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-2'
+python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-3'
+python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-4'
+python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-5'
+python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-6'
+

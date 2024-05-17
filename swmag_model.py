@@ -85,7 +85,7 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
 									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
 									mean=True, std=True, maximum=True, median=True,
-									forecast=1, window=15, classification=True)
+									forecast=1, window=30, classification=True)
 
 	supermag_df = RP()
 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
@@ -330,7 +330,7 @@ class SWMAG(nn.Module):
 		x = self.model(x)
 
 		# clipping to avoid values too small for backprop
-		# x = torch.clamp(x, min=1e-9)
+		x = torch.clamp(x, min=1e-9)
 
 		return x
 
@@ -425,7 +425,7 @@ class Early_Stopping():
 					'optimizer':self.optimizer.state_dict(),
 					'best_epoch':self.best_epoch,
 					'finished_training':False},
-					f'models/{VERSION}.pt')
+					f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
 
 
 def resume_training(model, optimizer):
@@ -444,13 +444,13 @@ def resume_training(model, optimizer):
 	'''
 
 	try:
-		checkpoint = torch.load(f'models/{VERSION}.pt')
+		checkpoint = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
 		model.load_state_dict(checkpoint['model'])
 		optimizer.load_state_dict(checkpoint['optimizer'])
 		epoch = checkpoint['best_epoch']
 		finished_training = checkpoint['finished_training']
 	except KeyError:
-		model.load_state_dict(torch.load(f'models/{VERSION}.pt'))
+		model.load_state_dict(torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt'))
 		optimizer = None
 		epoch = 0
 		finished_training = True
@@ -480,7 +480,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	'''
 	optimizer = optim.Adam(model.parameters(), lr=1e-7)
 	# checking if the model has already been trained, loading it if it exists
-	if os.path.exists(f'models/{VERSION}.pt'):
+	if os.path.exists(f'models/{TARGET}/region_{REGION}_{VERSION}.pt'):
 		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer)
 	else:
 		finished_training = False
@@ -601,7 +601,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				model = SWMAG()
 
 				# loading the best model version
-				final = torch.load(f'models/{VERSION}.pt')
+				final = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
 
 				# setting the finished training flag to True
 				final['finished_training'] = True
@@ -610,7 +610,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				model.load_state_dict(final['model'])
 
 				# saving the final model
-				torch.save(final, f'models/{VERSION}.pt')
+				torch.save(final, f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
 
 				# breaking the loop
 				break
@@ -636,10 +636,10 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	else:
 		# loading the model if it has already been trained.
 		try:
-			final = torch.load(f'models/{VERSION}.pt')
+			final = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
 			model.load_state_dict(final['model'])
 		except KeyError:
-			model.load_state_dict(torch.load(f'models/{VERSION}.pt'))
+			model.load_state_dict(torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt'))
 
 	return model
 
@@ -716,19 +716,19 @@ def evaluation(model, test, test_dates):
 	return results_df
 
 
-def main(target, cluster, region):
+def main():
 	'''
 	Pulls all the above functions together. Outputs a saved file with the results.
 
 	'''
-	if not os.path.exists(f'outputs/{target}'):
-		os.makedirs(f'outputs/{target}')
-	if not os.path.exists(f'models/{target}'):
-		os.makedirs(f'models/{target}')
+	if not os.path.exists(f'outputs/{TARGET}'):
+		os.makedirs(f'outputs/{TARGET}')
+	if not os.path.exists(f'models/{TARGET}'):
+		os.makedirs(f'models/{TARGET}')
 
 	# loading all data and indicies
 	print('Loading data...')
-	xtrain, xval, xtest, ytrain, yval, ytest, dates_dict = getting_prepared_data(target_var=target, cluster=cluster, region=region)
+	xtrain, xval, xtest, ytrain, yval, ytest, dates_dict = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION)
 
 	print('xtrain shape: '+str(xtrain.shape))
 	print('xval shape: '+str(xval.shape))
@@ -737,7 +737,7 @@ def main(target, cluster, region):
 	print('yval shape: '+str(yval.shape))
 	print('ytest shape: '+str(ytest.shape))
 
-	with open(f'outputs/dates_dict_version_{VERSION}.pkl', 'wb') as f:
+	with open(f'outputs/dates_dict_rregion_{REGION}_version_{VERSION}.pkl', 'wb') as f:
 		pickle.dump(dates_dict, f)
 
 
@@ -767,7 +767,7 @@ def main(target, cluster, region):
 	# making predictions
 	print('Making predictions...')
 	results_df = evaluation(model, test, dates_dict['test'])
-	results_df.to_feather(f'outputs/{target}/non_twins_modeling_region_{region}_version_{VERSION}.feather')
+	results_df.to_feather(f'outputs/{TARGET}/non_twins_modeling_region_{REGION}_version_{VERSION}.feather')
 
 	# clearing the session to prevent memory leaks
 	gc.collect()
@@ -782,10 +782,14 @@ if __name__ == '__main__':
 
 	args = args.parse_args()
 
+	# global TARGET
+	# global REGION
+	# global CLUSTER
+
 	TARGET = args.target
 	REGION = args.region
 	CLUSTER = args.cluster
 
-	main(target=TARGET, cluster=CLUSTER, region=REGION)
+	main()
 
 	print('It ran. God job!')
