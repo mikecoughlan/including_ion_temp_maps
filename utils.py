@@ -32,6 +32,7 @@ supermag_dir = data_dir+'supermag/feather_files/'
 regions_dict = data_dir+'mike_working_dir/identifying_regions_data/adjusted_regions.pkl'
 regions_stat_dict = data_dir+'mike_working_dir/identifying_regions_data/twins_era_stats_dict_radius_regions_min_2.pkl'
 
+
 def loading_dicts():
 	'''
 	Loads the regional dictionaries and stats dictionaries
@@ -54,6 +55,30 @@ def loading_dicts():
 	stats = {f'region_{reg}': stats[f'region_{reg}'] for reg in region_numbers}
 
 	return regions, stats
+
+
+def loading_supermag(station):
+	'''
+	Loads the supermag data
+
+	Args:
+		station (string): station of interest
+
+	Returns:
+		df (pd.dataframe): dataframe containing the supermag data with a datetime index
+	'''
+
+	print(f'Loading station {station}....')
+	df = pd.read_feather(supermag_dir+station+'.feather')
+
+	# limiting the analysis to the nightside
+	df.set_index('Date_UTC', inplace=True, drop=True)
+	df.index = pd.to_datetime(df.index, format='%Y-%m-%d %H:%M:$S')
+	df['theta'] = (np.arctan2(df['N'], df['E']) * 180 / np.pi)	# calculates the angle of B_H
+	df['cos_theta'] = np.cos(df['theta'] * np.pi / 180)			# calculates the cosine of the angle of B_H
+	df['sin_theta'] = np.sin(df['theta'] * np.pi / 180)			# calculates the sine of the angle of B_H
+
+	return df
 
 
 def loading_twins_maps(full_map=False):
@@ -123,6 +148,63 @@ def getting_mean_lat(stations):
 	mean_lat = np.mean(latitudes)
 
 	return mean_lat
+
+
+def combining_stations_into_regions(stations, rsd, features=None, mean=False, std=False, maximum=False, median=False, map_keys=None):
+
+
+	start_time = pd.to_datetime('2009-07-20')
+	end_time = pd.to_datetime('2017-12-31')
+	twins_time_period = pd.date_range(start=start_time, end=end_time, freq='min')
+
+	regional_df = pd.DataFrame(index=twins_time_period)
+
+	# creating a dataframe for each feature with the twins time period as the index and storing them in a dict
+	feature_dfs = {}
+	if features is not None:
+		for feature in features:
+			feature_dfs[feature] = pd.DataFrame(index=twins_time_period)
+
+	for stat in stations:
+		df = loading_supermag(stat)
+		df = df[start_time:end_time]
+		if features is not None:
+			for feature in features:
+				feature_dfs[feature][f'{stat}_{feature}'] = df[feature]
+	if features is not None:
+		for feature in features:
+			if mean:
+				if feature == 'N' or feature == 'E':
+					regional_df[f'{feature}_mean'] = feature_dfs[feature].abs().mean(axis=1)
+				else:
+					regional_df[f'{feature}_mean'] = feature_dfs[feature].mean(axis=1)
+			if std:
+				regional_df[f'{feature}_std'] = feature_dfs[feature].std(axis=1)
+			if maximum:
+				if feature == 'N' or feature == 'E':
+					regional_df[f'{feature}_max'] = feature_dfs[feature].abs().max(axis=1)
+				else:
+					regional_df[f'{feature}_max'] = feature_dfs[feature].max(axis=1)
+			if median:
+				if feature == 'N' or feature == 'E':
+					regional_df[f'{feature}_median'] = feature_dfs[feature].abs().median(axis=1)
+				else:
+					regional_df[f'{feature}_median'] = feature_dfs[feature].median(axis=1)
+
+	indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=15)
+
+	regional_df['rsd'] = rsd['max_rsd']['max_rsd']
+	regional_df['rolling_rsd'] = rsd['max_rsd']['max_rsd'].rolling(indexer, min_periods=1).max()
+	regional_df['MLT'] = rsd['max_rsd']['MLT']
+	regional_df['cosMLT'] = np.cos(regional_df['MLT'] * 2 * np.pi * 15 / 360)
+	regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
+
+	if map_keys is not None:
+		segmented_df = regional_df[regional_df.index.isin(map_keys)]
+		return segmented_df
+
+	else:
+		return regional_df
 
 
 class RegionPreprocessing():

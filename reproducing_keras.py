@@ -29,20 +29,20 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
 import tqdm
 from scipy.stats import boxcox
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from spacepy import pycdf
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import torchvision
+import torchvision.transforms as transforms
 from torchsummary import summary
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torchvision.models.feature_extraction import (create_feature_extractor,
                                                    get_graph_node_names)
 
@@ -87,7 +87,7 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 									mean=True, std=True, maximum=True, median=True,
 									forecast=1, window=30, classification=True)
 
-	supermag_df = RP()
+	supermag_df = RP()	
 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
 
 	# converting the solarwind data to log10
@@ -519,7 +519,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 			# using the training set to train the model
 			for X, y in train:
-
+				
 				# moving the data to the available device
 				X = X.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
@@ -702,7 +702,7 @@ def evaluation(model, test, test_dates):
 
 			xtest_list.append(x)
 			ytest_list.append(y)
-
+	
 	print(f'Evaluation Loss: {running_loss/len(test)}')
 
 	# transforming the lists to arrays
