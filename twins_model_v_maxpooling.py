@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 TARGET = 'rsd'
-VERSION = 'swmag_v6'
+VERSION = 'twins_v_maxpooling'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -98,8 +98,20 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 
 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
 
+	# loading the TWINS maps
+	maps = utils.loading_twins_maps()
 
-	return merged_df, thresholds
+	# changing all negative values in maps to 0
+	for key in maps.keys():
+		maps[key]['map'][maps[key]['map'] < 0] = 0
+
+
+	return merged_df, thresholds, maps
+
+
+def twins_scaling(x, scaling_mean, scaling_std):
+	# scaling the data to have a mean of 0 and a standard deviation of 1
+	return (x - scaling_mean) / scaling_std
 
 
 def getting_prepared_data(target_var, cluster, region, get_features=False, do_scaling=True):
@@ -116,7 +128,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	'''
 
-	merged_df, thresholds = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
+	merged_df, thresholds, maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
 
 	# target = merged_df['classification']
 	target = merged_df[f'rolling_{target_var}']
@@ -168,6 +180,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	# using the days to split the data
 	for day in train_days:
 		train_dates_df = pd.concat([train_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
+		if train_dates_df['dates'].isna().sum() > 0:
+			print('Nans in training dates')
+			print(train_dates_df)
+			raise ValueError('Nans in training dates')
 	for day in val_days:
 		val_dates_df = pd.concat([val_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
 	for day in test_days:
@@ -184,7 +200,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	date_dict = {'train':pd.DataFrame(), 'val':pd.DataFrame(), 'test':pd.DataFrame()}
 
 	# getting the data corresponding to the dates
-	for storm, y in zip(storms, target):
+	for storm, y, twins in zip(storms, target, maps):
 
 		copied_storm = storm.copy()
 		copied_storm = copied_storm.reset_index(inplace=False, drop=False).rename(columns={'index':'Date_UTC'})
@@ -192,14 +208,17 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 		if storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in train_dates_df.index:
 			x_train.append(storm)
 			y_train.append(y)
+			twins_train.append(maps[twins]['map'])
 			date_dict['train'] = pd.concat([date_dict['train'], copied_storm['Date_UTC'][-10:]], axis=0)
 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in val_dates_df.index:
 			x_val.append(storm)
 			y_val.append(y)
+			twins_val.append(maps[twins]['map'])
 			date_dict['val'] = pd.concat([date_dict['val'], copied_storm['Date_UTC'][-10:]], axis=0)
 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in test_dates_df.index:
 			x_test.append(storm)
 			y_test.append(y)
+			twins_test.append(maps[twins]['map'])
 			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
 
 	date_dict['train'].reset_index(drop=True, inplace=True)
@@ -210,9 +229,25 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	date_dict['val'].rename(columns={date_dict['val'].columns[0]:'Date_UTC'}, inplace=True)
 	date_dict['test'].rename(columns={date_dict['test'].columns[0]:'Date_UTC'}, inplace=True)
 
-	to_scale_with = pd.concat(x_train, axis=0)
+	print(f'length of train dates: {len(twins_train)}')
+
+	# getting the mean and standard deviation of the twins training data
+	twins_scaling_array = np.vstack(twins_train).flatten()
+
+	print(f'shape of twins scaling array: {twins_scaling_array.shape}')
+	print(f'twins scaling array: {twins_scaling_array}')
+
+	twins_mean = np.mean(twins_scaling_array)
+	twins_std = np.std(twins_scaling_array)
+
+	# scaling the twins data
+	twins_train = [twins_scaling(x, twins_mean, twins_std) for x in twins_train]
+	twins_val = [twins_scaling(x, twins_mean, twins_std) for x in twins_val]
+	twins_test = [twins_scaling(x, twins_mean, twins_std) for x in twins_test]
+
+	swmag_scaling_array = pd.concat(x_train, axis=0)
 	scaler = StandardScaler()
-	scaler.fit(to_scale_with)
+	scaler.fit(swmag_scaling_array)
 	if do_scaling:
 		x_train = [scaler.transform(x) for x in x_train]
 		x_val = [scaler.transform(x) for x in x_val]
@@ -227,9 +262,14 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_test: {len(x_test)}')
 
 	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression')
-	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression')
-	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression')
+	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'], 
+																				dates=date_dict['train'], model_type='regression')
+
+	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'], 
+																		dates=date_dict['val'], model_type='regression')
+
+	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'], 
+																			dates=date_dict['test'], model_type='regression')
 
 	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
 
@@ -248,6 +288,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_val: {x_val.shape}')
 	print(f'shape of x_test: {x_test.shape}')
 
+	print(f'shape of twins_train: {twins_train.shape}')
+	print(f'shape of twins_val: {twins_val.shape}')
+	print(f'shape of twins_test: {twins_test.shape}')
+
 	print(f'Nans in training data: {np.isnan(x_train).sum()}')
 	print(f'Nans in validation data: {np.isnan(x_val).sum()}')
 	print(f'Nans in testing data: {np.isnan(x_test).sum()}')
@@ -257,9 +301,15 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'Nans in testing target: {np.isnan(y_test).sum()}')
 
 	if not get_features:
-		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict
+		return torch.tensor(x_train).unsqueeze(1), torch.tensor(twins_train).unsqueeze(1), torch.tensor(y_train), \
+				torch.tensor(x_val).unsqueeze(1), torch.tensor(twins_val).unsqueeze(1), torch.tensor(y_val), \
+				torch.tensor(x_test).unsqueeze(1), torch.tensor(twins_test).unsqueeze(1), torch.tensor(y_test), \
+				date_dict
 	else:
-		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict, features
+		return torch.tensor(x_train).unsqueeze(1), torch.tensor(twins_train).unsqueeze(1), torch.tensor(y_train), \
+				torch.tensor(x_val).unsqueeze(1), torch.tensor(twins_val).unsqueeze(1), torch.tensor(y_val), \
+				torch.tensor(x_test).unsqueeze(1), torch.tensor(twins_test).unsqueeze(1), torch.tensor(y_test), \
+				date_dict, features
 
 
 class CRSP(nn.Module):
@@ -304,9 +354,91 @@ class CRSP(nn.Module):
 		return crps
 
 
-class SWMAG(nn.Module):
+class Autoencoder(nn.Module):
 	def __init__(self):
-		super(SWMAG, self).__init__()
+		'''
+		Initializing the autoencoder model. Defining the layers of the encoder and decoder.
+
+		'''
+		# inheriting the functionality of the nn.Module class
+		super(Autoencoder, self).__init__()
+
+		# defining the layers of the encoder
+		self.encoder = nn.Sequential(
+
+			nn.Conv2d(in_channels=1, out_channels=64, kernel_size=2, stride=1, padding='same'),
+			nn.ReLU(),
+			nn.Dropout(0.2),
+
+			nn.Conv2d(in_channels=64, out_channels=128, kernel_size=2, stride=2, padding=0),
+			nn.ReLU(),
+			nn.Dropout(0.2),
+
+			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding='same'),
+			nn.ReLU(),
+			nn.Dropout(0.2),
+
+
+			# flattening the outputs of the last conv layer to go through a linear latent space
+			nn.Flatten(),
+			nn.Linear(256*45*30, 420),
+		)
+
+		# defining the layers of the decoder. Found using linear activation worked best here
+		self.decoder = nn.Sequential(
+
+			nn.Linear(420, 256*45*30),
+
+			# reshaping the data to go through the transposed conv layers
+			nn.Unflatten(1, (256, 45, 30)),
+
+			nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=3, stride=1, padding=1),
+			nn.Dropout(0.2),
+
+			nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=2, stride=2, padding=0),
+			nn.Dropout(0.2),
+
+			nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=2, stride=1, padding=1),
+			nn.Dropout(0.2),
+
+			nn.ConvTranspose2d(in_channels=32, out_channels=1, kernel_size=2, stride=1, padding=0),
+		)
+
+	def forward(self, x, get_latent=False):
+		'''
+		Function to pass the input through the model.
+
+		Args:
+			x (torch.tensor): the input data
+			get_latent (bool): whether to return the latent space representation of the data
+
+		Returns:
+			torch.tensor: the output of the model
+		'''
+
+		# passing the data through the encoder
+		latent = self.encoder(x)
+
+		# if the latent space is requested, return it
+		# if get_latent:
+		# 	return latent
+
+		# passing the latent space through the decoder
+		# else:
+		x = self.decoder(latent)
+
+		return x
+
+
+class TWINSModel(nn.Module):
+	def __init__(self, encoder):
+		super(TWINSModel, self).__init__()
+
+		self.maxpooling = nn.Sequential(
+
+			nn.MaxPool2d(kernel_size=(3,5), stride=(3,5)),
+
+		)
 
 		self.model = nn.Sequential(
 
@@ -316,7 +448,7 @@ class SWMAG(nn.Module):
 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
 			nn.Flatten(),
-			nn.Linear(256*15*7, 256),
+			nn.Linear(256*15*13, 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
@@ -326,14 +458,19 @@ class SWMAG(nn.Module):
 			nn.Sigmoid()
 		)
 
-	def forward(self, x):
+	def forward(self, swmag, twins):
 
-		x = self.model(x)
+		reduced = self.maxpooling(twins)
+		reduced = reduced.view(-1, 1, 30, 12)
+
+		x_input = torch.cat((swmag, reduced), dim=3)
+
+		output = self.model(x_input)
 
 		# clipping to avoid values too small for backprop
-		x = torch.clamp(x, min=1e-9)
+		output = torch.clamp(output, min=1e-9)
 
-		return x
+		return output
 
 
 class Early_Stopping():
@@ -519,17 +656,15 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 			running_training_loss, running_val_loss = 0.0, 0.0
 
 			# using the training set to train the model
-			for X, y in train:
+			for swmag, twins, y in train:
 
 				# moving the data to the available device
-				X = X.to(DEVICE, dtype=torch.float)
+				swmag = swmag.to(DEVICE, dtype=torch.float)
+				twins = twins.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
 
-				# adding a channel dimension to the data
-				X = X.unsqueeze(1)
-
 				# forward pass
-				output = model(X)
+				output = model(swmag, twins)
 
 				output = output.squeeze()
 
@@ -542,7 +677,8 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				optimizer.step()
 
 				# emptying the cuda cache
-				X = X.to('cpu')
+				swmag = swmag.to('cpu')
+				twins = twins.to('cpu')
 				y = y.to('cpu')
 
 				# adding the loss to the running training loss
@@ -554,26 +690,25 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 			# using validation set to check for overfitting
 			# looping through the batches
-			for X, y in val:
+			for swmag, twins, y in val:
 
 				# moving the data to the available device
-				X = X.to(DEVICE, dtype=torch.float)
+				swmag = swmag.to(DEVICE, dtype=torch.float)
+				twins = twins.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
-
-				# adding a channel dimension to the data
-				X = X.unsqueeze(1)
 
 				# forward pass with no gradient calculation
 				with torch.no_grad():
 
-					output = model(X)
+					output = model(swmag, twins)
 					# output = output.view(len(output),2)
 					output = output.squeeze()
 
 					val_loss = criterion(output, y)
 
 					# emptying the cuda cache
-					X = X.to('cpu')
+					swmag = swmag.to('cpu')
+					twins = twins.to('cpu')
 					y = y.to('cpu')
 
 					# adding the loss to the running val loss
@@ -596,23 +731,6 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				# clearing the cuda cache
 				torch.cuda.empty_cache()
 				gc.collect()
-
-				# clearing the model so the best one can be loaded without overwhelming the gpu memory
-				model = None
-				model = SWMAG()
-
-				# loading the best model version
-				final = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
-
-				# setting the finished training flag to True
-				final['finished_training'] = True
-
-				# getting the best model state dict
-				model.load_state_dict(final['model'])
-
-				# saving the final model
-				torch.save(final, f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
-
 				# breaking the loop
 				break
 
@@ -659,7 +777,7 @@ def evaluation(model, test, test_dates):
 	'''
 	print(f'length of test dates: {len(test_dates)}')
 	# creting an array to store the predictions
-	predicted_mean, predicted_std, xtest_list, ytest_list = [], [], [], []
+	predicted_mean, predicted_std, swmag_list, twins_list, ytest_list = [], [], [], [], []
 	# setting the encoder and decoder into evaluation model
 	model.eval()
 
@@ -670,14 +788,14 @@ def evaluation(model, test, test_dates):
 	model.to(DEVICE, dtype=torch.float)
 
 	with torch.no_grad():
-		for x, y in test:
 
-			x = x.to(DEVICE, dtype=torch.float)
+		for swmag, twins, y in test:
+
+			swmag = swmag.to(DEVICE, dtype=torch.float)
+			twins = twins.to(DEVICE, dtype=torch.float)
 			y = y.to(DEVICE, dtype=torch.float)
 
-			x = x.unsqueeze(1)
-
-			predicted = model(x)
+			predicted = model(swmag, twins)
 
 			predicted = predicted.squeeze()
 
@@ -688,10 +806,10 @@ def evaluation(model, test, test_dates):
 			# making sure the predicted value is on the cpu
 			if predicted.get_device() != -1:
 				predicted = predicted.to('cpu')
-			if x.get_device() != -1:
-				x = x.to('cpu')
-			if y.get_device() != -1:
-				y = y.to('cpu')
+			if swmag.get_device() != -1:
+				swmag = swmag.to('cpu')
+			if twins.get_device() != -1:
+				twins = twins.to('cpu')
 
 			# adding the decoded result to the predicted list after removing the channel dimension
 			predicted = torch.squeeze(predicted, dim=1).numpy()
@@ -699,9 +817,11 @@ def evaluation(model, test, test_dates):
 			predicted_mean.append(predicted[:,0])
 			predicted_std.append(predicted[:,1])
 
-			x = torch.squeeze(x, dim=1).numpy()
+			swmag = torch.squeeze(swmag, dim=1).numpy()
+			twins = torch.squeeze(twins, dim=1).numpy()
 
-			xtest_list.append(x)
+			swmag_list.append(swmag)
+			twins_list.append(twins)
 			ytest_list.append(y)
 
 	print(f'Evaluation Loss: {running_loss/len(test)}')
@@ -709,7 +829,8 @@ def evaluation(model, test, test_dates):
 	# transforming the lists to arrays
 	predicted_mean = np.concatenate(predicted_mean, axis=0)
 	predicted_std = np.concatenate(predicted_std, axis=0)
-	xtest_list = np.concatenate(xtest_list, axis=0)
+	swmag_list = np.concatenate(swmag_list, axis=0)
+	twins_list = np.concatenate(twins_list, axis=0)
 	ytest_list = np.concatenate(ytest_list, axis=0)
 
 	results_df = pd.DataFrame({'predicted_mean':predicted_mean, 'predicted_std':predicted_std, 'actual':ytest_list, 'dates':test_dates['Date_UTC']})
@@ -732,41 +853,68 @@ def main():
 
 	# loading all data and indicies
 	print('Loading data...')
-	xtrain, xval, xtest, ytrain, yval, ytest, dates_dict = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION)
+	train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, dates_dict = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION)
 
-	print('xtrain shape: '+str(xtrain.shape))
-	print('xval shape: '+str(xval.shape))
-	print('xtest shape: '+str(xtest.shape))
-	print('ytrain shape: '+str(ytrain.shape))
-	print('yval shape: '+str(yval.shape))
-	print('ytest shape: '+str(ytest.shape))
+	# print(f'shape of train: {train["swmag"].shape}; shape of val: {val["swmag"].shape}; shape of test: {test["swmag"].shape}')
+	# print(f'shape of train twins: {train["twins"].shape}; shape of val twins: {val["twins"].shape}; shape of test twins: {test["twins"].shape}')
+	# print(f'shape of train y: {train["y"].shape}; shape of val y: {val["y"].shape}; shape of test y: {test["y"].shape}')
 
-	with open(f'outputs/dates_dict_rregion_{REGION}_version_{VERSION}.pkl', 'wb') as f:
+	with open(f'outputs/dates_dict_region_{REGION}_version_{VERSION}.pkl', 'wb') as f:
 		pickle.dump(dates_dict, f)
 
 
-	train_size = list(xtrain.shape)
-
 	# creating the dataloaders
-	train = DataLoader(list(zip(xtrain, ytrain)), batch_size=CONFIG['batch_size'], shuffle=True)
-	val = DataLoader(list(zip(xval, yval)), batch_size=CONFIG['batch_size'], shuffle=True)
-	test = DataLoader(list(zip(xtest, ytest)), batch_size=CONFIG['batch_size'], shuffle=False)
+	train = DataLoader(list(zip(train_swmag, train_twins, ytrain)), batch_size=CONFIG['batch_size'], shuffle=True)
+	val = DataLoader(list(zip(val_swmag, val_twins, yval)), batch_size=CONFIG['batch_size'], shuffle=True)
+	test = DataLoader(list(zip(test_swmag, test_twins, ytest)), batch_size=CONFIG['batch_size'], shuffle=False)
 
+	# batch = next(iter(train))
+	# print(f'batch shape: {batch[0]}')
 	# creating the model
 	print('Creating model....')
 
 	# setting random seed
 	torch.manual_seed(CONFIG['random_seed'])
 	torch.cuda.manual_seed(CONFIG['random_seed'])
-	model = SWMAG()
+
+	autoencoder = Autoencoder()
+	saved_model = torch.load(f'models/autoencoder_pytorch_perceptual_v1-42.pt')
+	autoencoder.load_state_dict(saved_model['model'])
+
+	# getting jjsut the encoder part of the model
+	encoder = autoencoder.encoder
+
+	# freezing the encoder
+	for param in encoder.parameters():
+		param.requires_grad = False
+
+	print(f'Encoder: {encoder}')
+
+	model = TWINSModel(encoder=encoder)
 
 	# printing model summary
 	model.to(DEVICE)
-	print(summary(model, (1, train_size[1], train_size[2])))
 
 	# fitting the model
 	print('Fitting model...')
 	model = fit_model(model, train, val, val_loss_patience=25, num_epochs=CONFIG['epochs'])
+
+	# clearing the model so the best one can be loaded without overwhelming the gpu memory
+	model = None
+	model = TWINSModel(encoder=encoder)
+
+	# loading the best model version
+	final = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
+
+	# setting the finished training flag to True
+	final['finished_training'] = True
+
+	# getting the best model state dict
+	model.load_state_dict(final['model'])
+
+	# saving the final model
+	torch.save(final, f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
+
 
 	# making predictions
 	print('Making predictions...')
