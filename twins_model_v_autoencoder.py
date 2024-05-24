@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 TARGET = 'rsd'
-VERSION = 'twins_v_autoencoder'
+VERSION = 'twins_v1_autoencoder'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -436,7 +436,7 @@ class TWINSModel(nn.Module):
 
 		self.encoder = encoder
 
-		self.model = nn.Sequential(
+		self.cnn_block = nn.Sequential(
 
 			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
@@ -444,7 +444,10 @@ class TWINSModel(nn.Module):
 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
 			nn.Flatten(),
-			nn.Linear(256*15*14, 256),
+		)
+
+		self.fc_block = nn.Sequential(
+			nn.Linear((256*15*7)+(420), 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
@@ -457,11 +460,12 @@ class TWINSModel(nn.Module):
 	def forward(self, swmag, twins):
 
 		encoded = self.encoder(twins)
-		encoded = encoded.view(-1, 1, 30, 14)
 
-		x_input = torch.cat((swmag, encoded), dim=3)
+		swmag_output = self.cnn_block(swmag)
 
-		output = self.model(x_input)
+		x_input = torch.cat((swmag_output, encoded), dim=1)
+
+		output = self.fc_block(x_input)
 
 		# clipping to avoid values too small for backprop
 		output = torch.clamp(output, min=1e-9)
@@ -612,7 +616,10 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	Returns:
 		object: the trained model
 	'''
-	optimizer = optim.Adam(model.parameters(), lr=1e-7)
+	optimizer = optim.Adam([{'params':model.cnn_block.parameters()},
+								{'params':model.encoder.parameters(), 'lr':1e-8},
+								{'params':model.fc_block.parameters()}],
+								lr=1e-7)
 	# checking if the model has already been trained, loading it if it exists
 	if os.path.exists(f'models/{TARGET}/region_{REGION}_{VERSION}.pt'):
 		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer)
@@ -634,7 +641,10 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 		# defining the loss function and the optimizer
 		criterion = CRSP()
-		optimizer = optim.Adam(model.parameters(), lr=1e-7)
+		optimizer = optim.Adam([{'params':model.cnn_block.parameters()},
+								{'params':model.encoder.parameters(), 'lr':1e-8},
+								{'params':model.fc_block.parameters()}],
+								lr=1e-7)
 
 		# initalizing the early stopping class
 		early_stopping = Early_Stopping(decreasing_loss_patience=val_loss_patience)
@@ -806,6 +816,8 @@ def evaluation(model, test, test_dates):
 				swmag = swmag.to('cpu')
 			if twins.get_device() != -1:
 				twins = twins.to('cpu')
+			if y.get_device() != -1:
+				y = y.to('cpu')
 
 			# adding the decoded result to the predicted list after removing the channel dimension
 			predicted = torch.squeeze(predicted, dim=1).numpy()
@@ -880,16 +892,18 @@ def main():
 	# getting jjsut the encoder part of the model
 	encoder = autoencoder.encoder
 
-	# freezing the encoder
-	for param in encoder.parameters():
-		param.requires_grad = False
+	encoder.to(DEVICE)
 
-	print(f'Encoder: {encoder}')
+	# # freezing the encoder
+	# for param in encoder.parameters():
+	# 	param.requires_grad = False
+
+	# print(f'Encoder: {encoder}')
 
 	model = TWINSModel(encoder=encoder)
 
-	# printing model summary
 	model.to(DEVICE)
+	print(summary(model, input_size=[(1, 30, 14), (1, 90, 60)]))
 
 	# fitting the model
 	print('Fitting model...')
@@ -916,7 +930,7 @@ def main():
 	print('Making predictions...')
 	results_df = evaluation(model, test, dates_dict['test'])
 	print(results_df.head())
-	results_df.to_feather(f'outputs/{TARGET}/non_twins_modeling_region_{REGION}_version_{VERSION}.feather')
+	results_df.to_feather(f'outputs/{TARGET}/twins_modeling_region_{REGION}_version_{VERSION}.feather')
 
 	# clearing the session to prevent memory leaks
 	gc.collect()

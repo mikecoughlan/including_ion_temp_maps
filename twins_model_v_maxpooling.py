@@ -810,6 +810,8 @@ def evaluation(model, test, test_dates):
 				swmag = swmag.to('cpu')
 			if twins.get_device() != -1:
 				twins = twins.to('cpu')
+			if y.get_device() != -1:
+				y = y.to('cpu')
 
 			# adding the decoded result to the predicted list after removing the channel dimension
 			predicted = torch.squeeze(predicted, dim=1).numpy()

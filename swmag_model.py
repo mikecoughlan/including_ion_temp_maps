@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 TARGET = 'rsd'
-VERSION = 'swmag_v6'
+VERSION = 'swmag_v6-1'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -201,6 +201,42 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 			x_test.append(storm)
 			y_test.append(y)
 			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
+
+	new_train, new_val, new_test = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+	new_train = pd.concat(x_train, axis=0)
+	new_val = pd.concat(x_val, axis=0)
+	new_test = pd.concat(x_test, axis=0)
+
+	train_description = new_train.describe()
+	val_description = new_val.describe()
+	test_description = new_test.describe()
+
+	train_description.to_feather(f'outputs/{REGION}_{VERSION}_train_description.feather')
+	val_description.to_feather(f'outputs/{REGION}_{VERSION}_val_description.feather')
+	test_description.to_feather(f'outputs/{REGION}_{VERSION}_test_description.feather')
+
+	print('Descriptions saved!')
+
+	print(f'new train: {new_train.isnull().sum()}')
+
+	new_y_train = np.concatenate(y_train, axis=0)
+	new_y_val = np.concatenate(y_val, axis=0)
+	new_y_test = np.concatenate(y_test, axis=0)
+
+	print(f'train ratio: {new_y_train.sum()/len(new_y_train)}')
+	print(f'val ratio: {new_y_val.sum()/len(new_y_val)}')
+	print(f'test ratio: {new_y_test.sum()/len(new_y_test)}')
+
+	# fig, axes = plt.subplots(1,1, figsize=(10,5))
+	# axes.plot(new_train.index, new_train['cosMLT'])
+	# axes.plot(new_val.index, new_val['cosMLT'])
+	# axes.plot(new_test.index, new_test['cosMLT'])
+	# axes.set_title('Cosine of MLT')
+	# plt.show()
+
+	print(f'new train: {new_train.isnull().sum()}')
+	print(f'new val: {new_val.isnull().sum()}')
+	print(f'new test: {new_test.isnull().sum()}')
 
 	date_dict['train'].reset_index(drop=True, inplace=True)
 	date_dict['val'].reset_index(drop=True, inplace=True)

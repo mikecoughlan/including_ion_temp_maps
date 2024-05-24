@@ -226,12 +226,10 @@ class RegionPreprocessing():
 		self.median = median
 
 		self.__dict__.update(kwargs)
-		print(self.__dict__)
 		self.forecast = self.__dict__.get('forecast', 15)
 		self.window = self.__dict__.get('window', 15)
 		self.classification = self.__dict__.get('classification', False)
-
-		print(self.__dict__)
+		self.target_param = self.__dict__.get('target_param', 'rsd')
 
 		print(f'Forecast: {self.forecast}, Window: {self.window}, Classification: {self.classification}')
 
@@ -325,21 +323,64 @@ class RegionPreprocessing():
 		return dbdt_df
 
 
-	def finding_mlt(self):
-		'''Finding the station in the middle of the region by geolongitude and using that as the MLT for the region.'''
+	# def finding_mlt(self):
+	# 	'''Finding the station in the middle of the region by geolongitude and using that as the MLT for the region.'''
 
-		# if the difference in geolon is greater than 180 degrees then convert all the values from 0-360 to -180-180
-		lons_list = list(self.lons_dict.values())
-		if max(lons_list) - min(lons_list) > 180:
-			for key, value in self.lons_dict.items():
-				if value > 180:
-					value = value - 360
-		lons_list = list(self.lons_dict.values())
-		median = np.median(lons_list)
-		# finding the station closest to the median longitude
-		closest = min(lons_list, key=lambda x:abs(x-median))
-		# finding the station that is closest to the median longitude
-		station = [key for key, value in self.lons_dict.items() if value == closest][0]
+		# # if the difference in geolon is greater than 180 degrees then convert all the values from 0-360 to -180-180
+		# lons_list = list(self.lons_dict.values())
+		# if max(lons_list) - min(lons_list) > 180:
+		# 	for key, value in self.lons_dict.items():
+		# 		if value > 180:
+		# 			value = value - 360
+		# lons_list = list(self.lons_dict.values())
+		# median = np.median(lons_list)
+		# # finding the station closest to the median longitude
+		# closest = min(lons_list, key=lambda x:abs(x-median))
+		# # finding the station that is closest to the median longitude
+		# station = [key for key, value in self.lons_dict.items() if value == closest][0]
+
+		# print(f'Station with the median longitude: {station}')
+
+		# return self.mlt_df[station]
+
+	def finding_mlt(self):
+		'''finding which station has the least missing data and using that to define the mlt for the region'''
+
+		temp_df = self.mlt_df.copy()
+
+		storm_list = pd.read_feather('outputs/regular_twins_map_dates.feather', columns=['dates'])
+		storm_list = storm_list['dates']
+
+		stime, etime, storms = [], [], []					# will store the resulting time stamps here then append them to the storm time df
+
+		# will loop through the storm dates, create a datetime object for the lead and recovery time stamps and append those to different lists
+		for date in storm_list:
+			if isinstance(date, str):
+				date = pd.to_datetime(date, format='%Y-%m-%d %H:%M:%S')
+				stime.append(date.round('T')-pd.Timedelta(minutes=30))
+				etime.append(date.round('T')+pd.Timedelta(minutes=9))
+			else:
+				stime.append(date.round('T')-pd.Timedelta(minutes=30))
+				etime.append(date.round('T')+pd.Timedelta(minutes=9))
+		
+		for start, end in zip(stime, etime):		# looping through the storms to remove the data from the larger df
+			if start < temp_df.index[0] or end > temp_df.index[-1]:						# if the storm is outside the range of the data, skip it
+				continue
+			storm = temp_df[(temp_df.index >= start) & (temp_df.index <= end)]
+
+			if len(storm) != 0:
+				storms.append(storm)
+
+		all_storms = pd.concat(storms, axis=0)
+		storm.reset_index(drop=True, inplace=True)		# resetting the storm index and simultaniously dropping the date so it doesn't get trained on
+		
+
+		# self.mlt_df['mix'] = self.mlt_df.median(axis=1)
+		missing_mlt = temp_df.isnull().sum()
+		station = missing_mlt.idxmin()
+
+		print(f'Missing data for each station: {missing_mlt}')
+		print(f'Station with the least missing data: {station}')
 
 		return self.mlt_df[station]
 
@@ -384,6 +425,8 @@ class RegionPreprocessing():
 			df = self.loading_supermag(stat)
 			self.lons_dict[stat] = df['GEOLON'].loc[df['GEOLON'].first_valid_index()]
 			df = df[start_time:end_time]
+			print(f'Station: {stat}')
+			print(f'Nan values: {df.isnull().sum()}')
 			self.mlt_df[stat] = df['MLT']
 			if self.features is not None:
 				for feature in self.features:
@@ -420,7 +463,7 @@ class RegionPreprocessing():
 
 		if self.classification:
 
-			regional_df = self.classification_column(df=regional_df, param='rsd', percentile=0.99)
+			regional_df = self.classification_column(df=regional_df, param=self.target_param, percentile=0.99)
 
 		if map_keys is not None:
 			regional_df = regional_df[regional_df.index.isin(map_keys)]
@@ -593,6 +636,8 @@ def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=F
 	for date in storm_list:
 		if isinstance(date, str):
 			date = pd.to_datetime(date, format='%Y-%m-%d %H:%M:%S')
+			stime.append(date.round('T')-pd.Timedelta(minutes=lead))
+			etime.append(date.round('T')+pd.Timedelta(minutes=recovery))
 		if twins:
 			stime.append(date.round('T')-pd.Timedelta(minutes=lead))
 			etime.append(date.round('T')+pd.Timedelta(minutes=recovery))
