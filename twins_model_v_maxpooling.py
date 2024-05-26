@@ -262,13 +262,13 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_test: {len(x_test)}')
 
 	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'], 
+	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'],
 																				dates=date_dict['train'], model_type='regression')
 
-	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'], 
+	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'],
 																		dates=date_dict['val'], model_type='regression')
 
-	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'], 
+	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'],
 																			dates=date_dict['test'], model_type='regression')
 
 	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
@@ -354,82 +354,6 @@ class CRSP(nn.Module):
 		return crps
 
 
-class Autoencoder(nn.Module):
-	def __init__(self):
-		'''
-		Initializing the autoencoder model. Defining the layers of the encoder and decoder.
-
-		'''
-		# inheriting the functionality of the nn.Module class
-		super(Autoencoder, self).__init__()
-
-		# defining the layers of the encoder
-		self.encoder = nn.Sequential(
-
-			nn.Conv2d(in_channels=1, out_channels=64, kernel_size=2, stride=1, padding='same'),
-			nn.ReLU(),
-			nn.Dropout(0.2),
-
-			nn.Conv2d(in_channels=64, out_channels=128, kernel_size=2, stride=2, padding=0),
-			nn.ReLU(),
-			nn.Dropout(0.2),
-
-			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding='same'),
-			nn.ReLU(),
-			nn.Dropout(0.2),
-
-
-			# flattening the outputs of the last conv layer to go through a linear latent space
-			nn.Flatten(),
-			nn.Linear(256*45*30, 420),
-		)
-
-		# defining the layers of the decoder. Found using linear activation worked best here
-		self.decoder = nn.Sequential(
-
-			nn.Linear(420, 256*45*30),
-
-			# reshaping the data to go through the transposed conv layers
-			nn.Unflatten(1, (256, 45, 30)),
-
-			nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=3, stride=1, padding=1),
-			nn.Dropout(0.2),
-
-			nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=2, stride=2, padding=0),
-			nn.Dropout(0.2),
-
-			nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=2, stride=1, padding=1),
-			nn.Dropout(0.2),
-
-			nn.ConvTranspose2d(in_channels=32, out_channels=1, kernel_size=2, stride=1, padding=0),
-		)
-
-	def forward(self, x, get_latent=False):
-		'''
-		Function to pass the input through the model.
-
-		Args:
-			x (torch.tensor): the input data
-			get_latent (bool): whether to return the latent space representation of the data
-
-		Returns:
-			torch.tensor: the output of the model
-		'''
-
-		# passing the data through the encoder
-		latent = self.encoder(x)
-
-		# if the latent space is requested, return it
-		# if get_latent:
-		# 	return latent
-
-		# passing the latent space through the decoder
-		# else:
-		x = self.decoder(latent)
-
-		return x
-
-
 class TWINSModel(nn.Module):
 	def __init__(self, encoder):
 		super(TWINSModel, self).__init__()
@@ -440,7 +364,7 @@ class TWINSModel(nn.Module):
 
 		)
 
-		self.model = nn.Sequential(
+		self.cnn_block = nn.Sequential(
 
 			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
@@ -448,7 +372,10 @@ class TWINSModel(nn.Module):
 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
 			nn.Flatten(),
-			nn.Linear(256*15*13, 256),
+		)
+
+		self.fc_block = nn.Sequential(
+			nn.Linear((256*15*7)+(420), 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
@@ -460,12 +387,13 @@ class TWINSModel(nn.Module):
 
 	def forward(self, swmag, twins):
 
-		reduced = self.maxpooling(twins)
-		reduced = reduced.view(-1, 1, 30, 12)
+		pooled = self.maxpooling(twins)
 
-		x_input = torch.cat((swmag, reduced), dim=3)
+		swmag_output = self.cnn_block(swmag)
 
-		output = self.model(x_input)
+		x_input = torch.cat((swmag_output, pooled), dim=1)
+
+		output = self.fc_block(x_input)
 
 		# clipping to avoid values too small for backprop
 		output = torch.clamp(output, min=1e-9)
