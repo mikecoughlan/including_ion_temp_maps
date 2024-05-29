@@ -8,5 +8,3 @@ python3 twins_model_v_maxpooling.py --target 'rsd' --cluster 'greenland_cluster'
 python3 twins_model_v_maxpooling.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-1'
 python3 twins_model_v_maxpooling.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-2'
 python3 twins_model_v_maxpooling.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-3'
-
-

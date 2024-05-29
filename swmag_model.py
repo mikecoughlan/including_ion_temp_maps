@@ -207,6 +207,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	new_val = pd.concat(x_val, axis=0)
 	new_test = pd.concat(x_test, axis=0)
 
+	# new_train = new_train[pd.to_datetime('2012-03-01 00:00:00'):pd.to_datetime('2012-04-01 00:00:00')]
+	# new_val = new_val[pd.to_datetime('2012-03-01 00:00:00'):pd.to_datetime('2012-04-01 00:00:00')]
+	# new_test = new_test[pd.to_datetime('2012-03-01 00:00:00'):pd.to_datetime('2012-04-01 00:00:00')]
+
 	train_description = new_train.describe()
 	val_description = new_val.describe()
 	test_description = new_test.describe()
@@ -227,12 +231,15 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'val ratio: {new_y_val.sum()/len(new_y_val)}')
 	print(f'test ratio: {new_y_test.sum()/len(new_y_test)}')
 
-	# fig, axes = plt.subplots(1,1, figsize=(10,5))
-	# axes.plot(new_train.index, new_train['cosMLT'])
-	# axes.plot(new_val.index, new_val['cosMLT'])
-	# axes.plot(new_test.index, new_test['cosMLT'])
-	# axes.set_title('Cosine of MLT')
-	# plt.show()
+	fig, axes = plt.subplots(1,1, figsize=(10,5))
+	axes.plot(new_train.index, new_train['cosMLT'])
+	axes.plot(new_val.index, new_val['cosMLT'])
+	axes.plot(new_test.index, new_test['cosMLT'])
+	axes.set_xlim(pd.to_datetime('2012-03-01 00:00:00'),pd.to_datetime('2012-04-01 00:00:00'))
+	axes.set_title('Cosine of MLT')
+	plt.show()
+
+	raise ValueError('Stop here!')
 
 	print(f'new train: {new_train.isnull().sum()}')
 	print(f'new val: {new_val.isnull().sum()}')
@@ -344,14 +351,15 @@ class SWMAG(nn.Module):
 	def __init__(self):
 		super(SWMAG, self).__init__()
 
-		self.model = nn.Sequential(
+		self.conv_block = nn.Sequential(
 
 			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
 			nn.MaxPool2d(kernel_size=2, stride=2),
 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
-			nn.Flatten(),
+		)
+		self.linear_block = nn.Sequential(
 			nn.Linear(256*15*7, 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
@@ -364,12 +372,32 @@ class SWMAG(nn.Module):
 
 	def forward(self, x):
 
-		x = self.model(x)
+		x = self.conv_block(x)
+		x = torch.reshape(x, (-1, 256*15*7))
+		x = self.linear_block(x)
 
 		# clipping to avoid values too small for backprop
 		x = torch.clamp(x, min=1e-9)
 
 		return x
+	
+	def predict(self, x, return_numpy=False):
+
+		if not isinstance(x, torch.Tensor):
+			x = torch.tensor(x).to(DEVICE, dtype=torch.float)
+		
+		self.eval()
+		with torch.no_grad():
+			
+			output = self.forward(x)
+
+		if return_numpy:
+			output = output.cpu().numpy()
+		
+		else:
+			output = output.cpu()
+		
+		return output
 
 
 class Early_Stopping():

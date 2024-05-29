@@ -262,13 +262,13 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_test: {len(x_test)}')
 
 	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'], 
+	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'],
 																				dates=date_dict['train'], model_type='regression')
 
-	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'], 
+	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'],
 																		dates=date_dict['val'], model_type='regression')
 
-	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'], 
+	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'],
 																			dates=date_dict['test'], model_type='regression')
 
 	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
@@ -378,7 +378,6 @@ class Autoencoder(nn.Module):
 			nn.ReLU(),
 			nn.Dropout(0.2),
 
-
 			# flattening the outputs of the last conv layer to go through a linear latent space
 			nn.Flatten(),
 			nn.Linear(256*45*30, 420),
@@ -443,7 +442,7 @@ class TWINSModel(nn.Module):
 			nn.MaxPool2d(kernel_size=2, stride=2),
 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
-			nn.Flatten(),
+			# nn.Flatten(),
 		)
 
 		self.fc_block = nn.Sequential(
@@ -469,6 +468,26 @@ class TWINSModel(nn.Module):
 
 		# clipping to avoid values too small for backprop
 		output = torch.clamp(output, min=1e-9)
+
+		return output
+
+	def predict(self, swmag, twins, return_numpy=False):
+
+		if not isinstance(swmag, torch.Tensor):
+			swmag = torch.tensor(swmag).to(DEVICE, dtype=torch.float)
+		if not isinstance(twins, torch.Tensor):
+			twins = torch.tensor(twins).to(DEVICE, dtype=torch.float)
+
+		self.eval()
+		with torch.no_grad():
+
+			output = self.forward(swmag, twins)
+
+		if return_numpy:
+			output = output.cpu().numpy()
+
+		else:
+			output = output.cpu()
 
 		return output
 

@@ -14,12 +14,19 @@ import seaborn as sns
 import shap
 from matplotlib import colors
 from tqdm import tqdm
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from spacepy import pycdf
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
+import twins_model_v_autoencoder as twins_autoencoder 
+import twins_model_v_maxpooling as twins_maxpooling
+import swmag_model as swmag_modeling
 
 import utils
 
@@ -48,51 +55,272 @@ CONFIG = {'time_history':30,
 			'batch_size':128}
 
 
-TARGET = 'rsd'
-VERSION = 'twins_v1_autoencoder'
+def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
+
+	# loading all the datasets and dictonaries
+
+	# loading all the datasets and dictonaries
+	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
+									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
+									mean=True, std=True, maximum=True, median=True,
+									forecast=1, window=30, classification=True)
+
+	supermag_df = RP()
+	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
+
+	# converting the solarwind data to log10
+	solarwind['logT'] = np.log10(solarwind['T'])
+	solarwind.drop(columns=['T'], inplace=True)
+
+	thresholds = [supermag_df[target_var].quantile(percentile) for percentile in percentiles]
+
+	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
+
+	# loading the TWINS maps
+	maps = utils.loading_twins_maps()
+
+	# changing all negative values in maps to 0
+	for key in maps.keys():
+		maps[key]['map'][maps[key]['map'] < 0] = 0
 
 
-def loading_model(model_path):
+	return merged_df, thresholds, maps
 
-	# Load model
-	model = load_model(model_path, compile=False)
-	model.compile(loss=modeling.CRPS, optimizer=tf.keras.optimizers.Adam(learning_rate=CONFIG['learning_rate']))
+
+def twins_scaling(x, scaling_mean, scaling_std):
+	# scaling the data to have a mean of 0 and a standard deviation of 1
+	return (x - scaling_mean) / scaling_std
+
+
+def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=True):
+	'''
+	Calling the data prep class without the TWINS data for this version of the model.
+
+	Returns:
+		X_train (np.array): training inputs for the model
+		X_val (np.array): validation inputs for the model
+		X_test (np.array): testing inputs for the model
+		y_train (np.array): training targets for the model
+		y_val (np.array): validation targets for the model
+		y_test (np.array): testing targets for the model
+
+	'''
+
+	merged_df, thresholds, maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
+
+	# target = merged_df['classification']
+	target = merged_df[f'rolling_{target_var}']
+
+	# reducing the dataframe to only the features that will be used in the model plus the target variable
+	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
+	merged_df = merged_df[vars_to_keep]
+
+	print('Columns in Merged Dataframe: '+str(merged_df.columns))
+
+	# loading the data corresponding to the twins maps if it has already been calculated
+	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
+			storms_extracted_dict = pickle.load(f)
+		storms = storms_extracted_dict['storms']
+		target = storms_extracted_dict['target']
+
+	# if not, calculating the twins maps and extracting the storms
+	else:
+		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False)
+		storms_extracted_dict = {'storms':storms, 'target':target}
+		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
+			pickle.dump(storms_extracted_dict, f)
+
+	# making sure the target variable has been dropped from the input data
+	print('Columns in Dataframe: '+str(storms[0].columns))
+
+	# getting the feature names
+	features = storms[0].columns
+
+	# splitting the data on a day to day basis to reduce data leakage
+	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2017-12-01'), freq='D')
+	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
+
+	day_df = day_df.drop(specific_test_days)
+
+	train_days, test_days = train_test_split(day_df, test_size=0.1, shuffle=True, random_state=CONFIG['random_seed'])
+	train_days, val_days = train_test_split(train_days, test_size=0.125, shuffle=True, random_state=CONFIG['random_seed'])
+
+	# adding the two dateimte values of interest to the test days df
+	test_days = test_days.tolist()
+	test_days = pd.to_datetime(test_days)
+	test_days.append(specific_test_days)
+
+	train_dates_df, val_dates_df, test_dates_df = pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]})
+	x_train, x_val, x_test, y_train, y_val, y_test, twins_train, twins_val, twins_test = [], [], [], [], [], [], [], [], []
+
+	# using the days to split the data
+	for day in train_days:
+		train_dates_df = pd.concat([train_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
+		if train_dates_df['dates'].isna().sum() > 0:
+			print('Nans in training dates')
+			print(train_dates_df)
+			raise ValueError('Nans in training dates')
+	for day in val_days:
+		val_dates_df = pd.concat([val_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
+	for day in test_days:
+		test_dates_df = pd.concat([test_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
+
+	train_dates_df.set_index('dates', inplace=True)
+	val_dates_df.set_index('dates', inplace=True)
+	test_dates_df.set_index('dates', inplace=True)
+
+	train_dates_df.index = pd.to_datetime(train_dates_df.index)
+	val_dates_df.index = pd.to_datetime(val_dates_df.index)
+	test_dates_df.index = pd.to_datetime(test_dates_df.index)
+
+	date_dict = {'train':pd.DataFrame(), 'val':pd.DataFrame(), 'test':pd.DataFrame()}
+
+	# getting the data corresponding to the dates
+	for storm, y, twins in zip(storms, target, maps):
+
+		copied_storm = storm.copy()
+		copied_storm = copied_storm.reset_index(inplace=False, drop=False).rename(columns={'index':'Date_UTC'})
+
+		if storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in train_dates_df.index:
+			x_train.append(storm)
+			y_train.append(y)
+			if model_type=='twins':
+				twins_train.append(maps[twins]['map'])
+			date_dict['train'] = pd.concat([date_dict['train'], copied_storm['Date_UTC'][-10:]], axis=0)
+		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in val_dates_df.index:
+			x_val.append(storm)
+			y_val.append(y)
+			if model_type=='twins':
+				twins_val.append(maps[twins]['map'])
+			date_dict['val'] = pd.concat([date_dict['val'], copied_storm['Date_UTC'][-10:]], axis=0)
+		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in test_dates_df.index:
+			x_test.append(storm)
+			y_test.append(y)
+			if model_type=='twins':
+				twins_test.append(maps[twins]['map'])
+			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
+
+	date_dict['train'].reset_index(drop=True, inplace=True)
+	date_dict['val'].reset_index(drop=True, inplace=True)
+	date_dict['test'].reset_index(drop=True, inplace=True)
+
+	date_dict['train'].rename(columns={date_dict['train'].columns[0]:'Date_UTC'}, inplace=True)
+	date_dict['val'].rename(columns={date_dict['val'].columns[0]:'Date_UTC'}, inplace=True)
+	date_dict['test'].rename(columns={date_dict['test'].columns[0]:'Date_UTC'}, inplace=True)
+
+	print(f'length of train dates: {len(twins_train)}')
+
+	if model_type == 'twins':
+		# getting the mean and standard deviation of the twins training data
+		twins_scaling_array = np.vstack(twins_train).flatten()
+
+		print(f'shape of twins scaling array: {twins_scaling_array.shape}')
+		print(f'twins scaling array: {twins_scaling_array}')
+
+		twins_mean = np.mean(twins_scaling_array)
+		twins_std = np.std(twins_scaling_array)
+
+		# scaling the twins data
+		twins_train = [twins_scaling(x, twins_mean, twins_std) for x in twins_train]
+		twins_val = [twins_scaling(x, twins_mean, twins_std) for x in twins_val]
+		twins_test = [twins_scaling(x, twins_mean, twins_std) for x in twins_test]
+
+	swmag_scaling_array = pd.concat(x_train, axis=0)
+	scaler = StandardScaler()
+	scaler.fit(swmag_scaling_array)
+	if do_scaling:
+		x_train = [scaler.transform(x) for x in x_train]
+		x_val = [scaler.transform(x) for x in x_val]
+		x_test = [scaler.transform(x) for x in x_test]
+
+
+	print(f'shape of x_train: {len(x_train)}')
+	print(f'shape of x_val: {len(x_val)}')
+	print(f'shape of x_test: {len(x_test)}')
+
+	if model_type == 'twins':
+		# splitting the sequences for input to the CNN
+		x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'], 
+																					dates=date_dict['train'], model_type='regression')
+
+		x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'], 
+																			dates=date_dict['val'], model_type='regression')
+
+		x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'], 
+																				dates=date_dict['test'], model_type='regression')
+
+	else:
+		x_train, y_train, train_dates_to_drop, ___ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression')
+		x_val, y_val, val_dates_to_drop, ___ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression')
+		x_test, y_test, test_dates_to_drop, ___ = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression')
+
+	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
+
+	# dropping the dates that correspond to arrays that would have had nan values
+	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
+	date_dict['val'].drop(val_dates_to_drop, axis=0, inplace=True)
+	date_dict['test'].drop(test_dates_to_drop, axis=0, inplace=True)
+
+	date_dict['train'].reset_index(drop=True, inplace=True)
+	date_dict['val'].reset_index(drop=True, inplace=True)
+	date_dict['test'].reset_index(drop=True, inplace=True)
+
+	print(f'Total training dates: {len(date_dict["train"])}')
+
+
+	if model_type == 'twins':
+		return torch.tensor(x_train).unsqueeze(1), torch.tensor(twins_train).unsqueeze(1), torch.tensor(y_train), \
+				torch.tensor(x_val).unsqueeze(1), torch.tensor(twins_val).unsqueeze(1), torch.tensor(y_val), \
+				torch.tensor(x_test).unsqueeze(1), torch.tensor(twins_test).unsqueeze(1), torch.tensor(y_test), \
+				date_dict, features
+	else:
+		return torch.tensor(x_train).unsqueeze(1), torch.tensor(y_train), \
+				torch.tensor(x_val).unsqueeze(1), torch.tensor(y_val), \
+				torch.tensor(x_test).unsqueeze(1), torch.tensor(y_test), \
+				date_dict, features
+
+
+def loading_model(auto_or_max='auto'):
+
+	if MODEL_TYPE == 'twins':
+		if auto_or_max == 'auto':
+			print('Loading the twins autoencoder model....')
+			autoencoder = twins_autoencoder.Autoencoder()
+			saved_model = torch.load(f'models/autoencoder_pytorch_perceptual_v1-42.pt')
+			autoencoder.load_state_dict(saved_model['model'])
+
+			# getting jsut the encoder part of the model
+			encoder = autoencoder.encoder
+
+			encoder.to(DEVICE)
+
+			model = twins_autoencoder.TWINSModel(encoder=encoder)
+
+		elif auto_or_max == 'max':
+			print('Loading the twins maxpooling model....')
+			model = twins_maxpooling.TWINSModel()
+	elif MODEL_TYPE == 'swmag':
+		print('Loading the swmag model....')
+		model = swmag_modeling.SWMAG()
+	
+	else:
+		raise ValueError('The model type must be either twins or swmag.')
+
+	checkpoint = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
+	new_keys = ['conv_block.0.weight', 'conv_block.0.bias', 'conv_block.3.weight', 'conv_block.3.bias',
+						'linear_block.0.weight', 'linear_block.0.bias', 'linear_block.3.weight', 'linear_block.3.bias', 'linear_block.6.weight', 'linear_block.6.bias']
+	checkpoint['model'] = {new_key:value for new_key, value in zip(new_keys, checkpoint['model'].values())}
+	model.load_state_dict(checkpoint['model'])
+	model.to(DEVICE)
+	model.eval()
 
 	return model
 
-def segmenting_testing_data(xtest, ytest, twins_test, dates, storm_months=['2012-03-07'], storm_duration=[pd.DateOffset(days=7)]):
-
-	evaluation_dict = {month:{} for month in storm_months}
-
-	if len(storm_months) != len(storm_duration):
-		raise ValueError('The storm months and storm duration must be the same length.')
 
 
-	# turning storm months into datetime objects
-	storm_months = [pd.to_datetime(month) for month in storm_months]
-
-	# Creating daterange for storm months at 1 min frequency
-	storm_date_ranges = [pd.date_range(start=month, end=month+duration, freq='min') for month, duration in zip(storm_months, storm_duration)]
-
-	# getting the indicies in the dates df that correspond to the storm months and using those indicies to extract
-	# the corresponding arrays from xtest and ytest
-	storm_indicies = []
-	dates['Date_UTC'] = pd.to_datetime(dates['Date_UTC'])
-	for key, date_range in zip(evaluation_dict.keys(), storm_date_ranges):
-
-		temp_df = dates['Date_UTC'].isin(date_range)
-		if temp_df.sum() == 0:
-			raise ValueError(f'There are no dates in the dates df that match the storm month {key}.')
-		indicies = temp_df[temp_df == True].index.tolist()
-		evaluation_dict[key]['Date_UTC'] = dates['Date_UTC'][indicies].reset_index(drop=True, inplace=False)
-		evaluation_dict[key]['xtest'] = xtest[indicies]
-		evaluation_dict[key]['ytest'] = ytest[indicies]
-		evaluation_dict[key]['twins_test'] = twins_test[indicies]
-
-	return evaluation_dict
-
-
-def get_shap_values(model, model_name, training_data, evaluation_dict, background_examples=1000):
+def get_shap_values(model, model_name, training_data, testing_data, background_examples=1000):
 	'''
 	Function that calculates the shap values for the given model and evaluation data. First checks for previously calculated shap
 	values and loads them if they exist. If not, it calculates them and saves them to a pickle file.
@@ -107,48 +335,56 @@ def get_shap_values(model, model_name, training_data, evaluation_dict, backgroun
 										for each of the model outputs.
 	'''
 
-	if os.path.exists(f'outputs/shap_values/{model_name}_evaluation_dict.pkl'):
-		with open(f'outputs/shap_values/{model_name}_evaluation_dict.pkl', 'rb') as f:
-			evaluation_dict = pickle.load(f)
 
-	else:
-		# checking to see if the xtrain is a list of multiple inputs. Creates background for each using same random sampling
-		background = []
+	# checking to see if the xtrain is a list of multiple inputs. Creates background for each using same random sampling
+	background = []
+	if isinstance(training_data, list):
+		print('Training data is a list....')
 		random_indicies = np.random.choice(training_data[0].shape[0], background_examples, replace=False)
+		print(random_indicies)
+		print(training_data[0].shape)
+		print(training_data[1].shape)
+		print(len(training_data))
 		for data in training_data:
-			background.append(data[random_indicies])
+			print(data.shape)
+			background.append(data[random_indicies].to(DEVICE, dtype=torch.float))
 
 		explainer = shap.DeepExplainer(model, background)
 
-		print('Calculating shap values for each storm month....')
-		for key in evaluation_dict.keys():
-			delimiter = 10
-			shap_values = []
-			for batch in tqdm(range(0,evaluation_dict[key]['xtest'].shape[0],delimiter)):
-				try:
-					shap_values.append(explainer.shap_values([evaluation_dict[key]['xtest'][batch:(batch+delimiter)],
-															evaluation_dict[key]['twins_test'][batch:(batch+delimiter)]],
+		print('Calculating shap values....')
+		delimiter = 10
+		shap_values = []
+		for batch in tqdm(range(0,testing_data[0].shape[0],delimiter)):
+			try:
+				shap_values.append(explainer.shap_values([testing_data[0][batch:(batch+delimiter)].to(DEVICE, dtype=torch.float),
+														testing_data[1][batch:(batch+delimiter)].to(DEVICE, dtype=torch.float)],
+														check_additivity=False))
+			except IndexError:
+				shap_values.append(explainer.shap_values([testing_data[0][batch:(testing_data.shape[0]-1)].to(DEVICE, dtype=torch.float),
+															testing_data[1][batch:(testing_data.shape[0]-1)].to(DEVICE, dtype=torch.float)],
 															check_additivity=False))
-				except IndexError:
-					shap_values.append(explainer.shap_values([evaluation_dict[key]['xtest'][batch:(evaluation_dict[key]['xtest'].shape[0]-1)],
-																evaluation_dict[key]['twins_test'][batch:(evaluation_dict[key]['twins_test'].shape[0]-1)]],
-																check_additivity=False))
 
-			# shap_values = explainer.shap_values([evaluation_dict[key]['xtest'], evaluation_dict[key]['twins_test']], check_additivity=False)
-			evaluation_dict[key]['shap_values'] = shap_values
+	elif isinstance(training_data, np.ndarray) or isinstance(training_data, torch.Tensor):
+		print('Training data is a numpy array....')
+		random_indicies = np.random.choice(training_data.shape[0], background_examples, replace=False)
+		background = training_data[random_indicies].to(DEVICE, dtype=torch.float)
 
-		with open(f'outputs/shap_values/{model_name}_evaluation_dict.pkl', 'wb') as f:
-			pickle.dump(evaluation_dict, f)
+		explainer = shap.DeepExplainer(model, background)
 
-		# for key in evaluation_dict.keys():
-		# 	stacked_shap = evaluation_dict[key]['shap_values']
-		# 	stacked_shap = np.stack(stacked_shap, axis=0)
-		# 	evaluation_dict[key]['shap_values'] = stacked_shap
+		print('Calculating shap values....')
+		delimiter = 10
+		shap_values = []
+		for batch in tqdm(range(0,testing_data.shape[0],delimiter)):
+			try:
+				shap_values.append(explainer.shap_values(testing_data[batch:(batch+delimiter)].to(DEVICE, dtype=torch.float), check_additivity=False))
+			except IndexError:
+				shap_values.append(explainer.shap_values(testing_data[batch:(testing_data.shape[0]-1)].to(DEVICE, dtype=torch.float), check_additivity=False))
 
-		# with open(f'outputs/shap_values/{model_name}_evaluation_dict.pkl', 'wb') as f:
-		# 	pickle.dump(evaluation_dict, f)
+	else:
+		raise ValueError('The training data must be a numpy array or a list of arrays.')
 
-	return evaluation_dict
+
+	return shap_values
 
 
 def converting_shap_to_percentages(shap_values, features):
@@ -312,58 +548,57 @@ def getting_feature_importance(evaluation_dict, features):
 	return feature_importance_df
 
 
-def main(reverse=False):
+def main():
 
-	feature_importance_dict = {region:{} for region in REGIONS}
+	feature_importance_dict = {}
 
-	regs, __ = utils.loading_dicts()
-	regs = {key:regs[f'region_{key}'] for key in REGIONS}
-	for region in REGIONS:
-		feature_importance_dict[region]['mean_lat'] = utils.getting_mean_lat(regs[region]['station'])
+	if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
+		raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
 
-	del regs
+
+	print(f'Preparing data....')
+	# preparing the data for the model
+	if MODEL_TYPE == 'twins':
+		train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, \
+			dates_dict, features = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, model_type=MODEL_TYPE)
+		training_data, testing_data = [train_swmag, train_twins], [test_swmag, test_twins]
+	elif MODEL_TYPE == 'swmag':
+		xtrain, xval, xtest, ytrain, yval, ytest, \
+			dates_dict, features = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, model_type=MODEL_TYPE)
+		train_twins, val_twins, test_twins = None, None, None
+		training_data, testing_data = xtrain, xtest
+
+
+	print('Loading model....')
+	MODEL = loading_model()
+
+	print('Getting shap values....')
+	shap_values = get_shap_values(model=MODEL, model_name=f'{REGION}_{VERSION}', 
+									training_data=training_data, 
+									testing_data=testing_data, 
+									background_examples=1000)
+	
+	if MODEL_TYPE == 'swmag':
+		twins_test=None
+
+	evaluation_dict = {'shap_values':shap_values, 
+						'xtest':xtest,
+						'twins_test':twins_test,
+						'ytest':ytest,
+						'Date_UTC':dates_dict['test'],
+						'features':features}
+
+
+	with open(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl', 'wb') as f:
+		pickle.dump(evaluation_dict, f)
+
+	print('Plotting shap values....')
+	# plotting_shap_values(evaluation_dict, features, region)
+
+	print('Getting feature importance....')
+	# feature_importance_dict[region]['feature_importance'] = getting_feature_importance(evaluation_dict, features)
+
 	gc.collect()
-
-	looping_regions = REGIONS[::-1] if reverse else REGIONS
-
-	for region in looping_regions:
-
-		print(f'Working on region {region}....')
-
-		if os.path.exists(f'outputs/shap_values/twins_region_{region}_evaluation_dict.pkl'):
-			print(f'Shap values for region {region} already exist. Skipping....')
-			continue
-
-		if not os.path.exists(f'models/{TARGET}/twins_region_{region}_v{VERSION}.h5'):
-			print(f'Model for region {region} is not finished training yet. Skipping....')
-			continue
-
-		print(f'Preparing data....')
-		xtrain, ___, xtest, ytrain, ____, ytest, twins_train, ___, twins_test, dates_dict, features = modeling.getting_prepared_data(target_var=TARGET, region=region, get_features=True)
-
-		# reshaping the data to match the CNN input
-		xtrain = xtrain.reshape(xtrain.shape[0], xtrain.shape[1], xtrain.shape[2], 1)
-		xtest = xtest.reshape(xtest.shape[0], xtest.shape[1], xtest.shape[2], 1)
-		twins_train = twins_train.reshape(twins_train.shape[0], twins_train.shape[1], twins_train.shape[2], 1)
-		twins_test = twins_test.reshape(twins_test.shape[0], twins_test.shape[1], twins_test.shape[2], 1)
-
-		print('Segmenting the evaluation data....')
-		evaluation_dict = segmenting_testing_data(xtest, ytest, twins_test, dates_dict['test'], storm_months=['2012-03-07'])
-
-		print('Loading model....')
-		MODEL = loading_model(f'models/{TARGET}/twins_region_{region}_v{VERSION}.h5')
-
-		print('Getting shap values....')
-		evaluation_dict = get_shap_values(model=MODEL, model_name=f'twins_region_{region}', training_data=[xtrain,twins_train],
-											evaluation_dict=evaluation_dict, background_examples=100)
-
-		print('Plotting shap values....')
-		# plotting_shap_values(evaluation_dict, features, region)
-
-		print('Getting feature importance....')
-		# feature_importance_dict[region]['feature_importance'] = getting_feature_importance(evaluation_dict, features)
-
-		gc.collect()
 
 	# with open(f'outputs/shap_values/twins_feature_importance_dict.pkl', 'wb') as f:
 	# 	pickle.dump(feature_importance_dict, f)
@@ -419,7 +654,7 @@ if __name__ == '__main__':
 	args.add_argument('--region', type=str, help='The region to be modeled')
 	args.add_argument('--cluster', type=str, help='The cluster containing the region to be modeled')
 	args.add_argument('--version', type=str, help='The version of the model to be used for the SHAP values.')
-	args.add_argument('--model_type', type=str, help='The type of model to be used for the SHAP values.', options=['twins', 'swmag'])
+	args.add_argument('--model_type', type=str, help='The type of model to be used for the SHAP values.', choices=['twins', 'swmag'])
 
 	args = args.parse_args()
 

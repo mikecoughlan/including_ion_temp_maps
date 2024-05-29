@@ -218,7 +218,7 @@ class RegionPreprocessing():
 			raise ValueError('Must specify a region to analyze.')
 
 		self.cluster = cluster
-		self.region = region
+		self.region_name = region
 		self.features = features
 		self.mean = mean
 		self.std = std
@@ -346,43 +346,51 @@ class RegionPreprocessing():
 	def finding_mlt(self):
 		'''finding which station has the least missing data and using that to define the mlt for the region'''
 
-		temp_df = self.mlt_df.copy()
+		print(f'region keys: {self.region.keys()}')
+		if 'mlt_station' in self.region.keys():
+			print(f'MLT station already defined for region {self.region_name}')
+			return self.mlt_df[self.clusters[self.cluster]['regions'][self.region_name]['mlt_station']]
 
-		storm_list = pd.read_feather('outputs/regular_twins_map_dates.feather', columns=['dates'])
-		storm_list = storm_list['dates']
+		else:
+			temp_df = self.mlt_df.copy()
 
-		stime, etime, storms = [], [], []					# will store the resulting time stamps here then append them to the storm time df
+			storm_list = pd.read_feather('outputs/regular_twins_map_dates.feather', columns=['dates'])
+			storm_list = storm_list['dates']
 
-		# will loop through the storm dates, create a datetime object for the lead and recovery time stamps and append those to different lists
-		for date in storm_list:
-			if isinstance(date, str):
-				date = pd.to_datetime(date, format='%Y-%m-%d %H:%M:%S')
-				stime.append(date.round('T')-pd.Timedelta(minutes=30))
-				etime.append(date.round('T')+pd.Timedelta(minutes=9))
-			else:
-				stime.append(date.round('T')-pd.Timedelta(minutes=30))
-				etime.append(date.round('T')+pd.Timedelta(minutes=9))
-		
-		for start, end in zip(stime, etime):		# looping through the storms to remove the data from the larger df
-			if start < temp_df.index[0] or end > temp_df.index[-1]:						# if the storm is outside the range of the data, skip it
-				continue
-			storm = temp_df[(temp_df.index >= start) & (temp_df.index <= end)]
+			stime, etime, storms = [], [], []					# will store the resulting time stamps here then append them to the storm time df
 
-			if len(storm) != 0:
-				storms.append(storm)
+			# will loop through the storm dates, create a datetime object for the lead and recovery time stamps and append those to different lists
+			for date in storm_list:
+				if isinstance(date, str):
+					date = pd.to_datetime(date, format='%Y-%m-%d %H:%M:%S')
+					stime.append(date.round('T')-pd.Timedelta(minutes=30))
+					etime.append(date.round('T')+pd.Timedelta(minutes=9))
+				else:
+					stime.append(date.round('T')-pd.Timedelta(minutes=30))
+					etime.append(date.round('T')+pd.Timedelta(minutes=9))
+			
+			for start, end in zip(stime, etime):		# looping through the storms to remove the data from the larger df
+				if start < temp_df.index[0] or end > temp_df.index[-1]:						# if the storm is outside the range of the data, skip it
+					continue
+				storm = temp_df[(temp_df.index >= start) & (temp_df.index <= end)]
 
-		all_storms = pd.concat(storms, axis=0)
-		storm.reset_index(drop=True, inplace=True)		# resetting the storm index and simultaniously dropping the date so it doesn't get trained on
-		
+				if len(storm) != 0:
+					storms.append(storm)
 
-		# self.mlt_df['mix'] = self.mlt_df.median(axis=1)
-		missing_mlt = temp_df.isnull().sum()
-		station = missing_mlt.idxmin()
+			all_storms = pd.concat(storms, axis=0)
+			storm.reset_index(drop=True, inplace=True)		# resetting the storm index and simultaniously dropping the date so it doesn't get trained on
+			
 
-		print(f'Missing data for each station: {missing_mlt}')
-		print(f'Station with the least missing data: {station}')
+			# self.mlt_df['mix'] = self.mlt_df.median(axis=1)
+			missing_mlt = temp_df.isnull().sum()
+			station = missing_mlt.idxmin()
 
-		return self.mlt_df[station]
+			print(f'Missing data for each station: {missing_mlt}')
+			print(f'Station with the least missing data: {station}')
+
+			self.clusters[self.cluster]['regions'][self.region_name]['mlt_station'] = station
+
+			return self.mlt_df[station]
 
 
 	def calculating_rsd(self):
@@ -476,9 +484,12 @@ class RegionPreprocessing():
 		with open(cluster_dict, 'rb') as f:
 			self.clusters = pickle.load(f)
 
-		self.region = self.clusters[self.cluster]['regions'][self.region]
+		self.region = self.clusters[self.cluster]['regions'][self.region_name]
 
 		regional_df = self.combining_stations_into_regions()
+
+		with open(cluster_dict, 'wb') as f:
+			pickle.dump(self.clusters, f)
 
 		return regional_df
 
@@ -636,8 +647,8 @@ def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=F
 	for date in storm_list:
 		if isinstance(date, str):
 			date = pd.to_datetime(date, format='%Y-%m-%d %H:%M:%S')
-			stime.append(date.round('T')-pd.Timedelta(minutes=lead))
-			etime.append(date.round('T')+pd.Timedelta(minutes=recovery))
+			# stime.append(date.round('T')-pd.Timedelta(minutes=lead))
+			# etime.append(date.round('T')+pd.Timedelta(minutes=recovery))
 		if twins:
 			stime.append(date.round('T')-pd.Timedelta(minutes=lead))
 			etime.append(date.round('T')+pd.Timedelta(minutes=recovery))

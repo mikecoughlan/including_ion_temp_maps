@@ -355,12 +355,13 @@ class CRSP(nn.Module):
 
 
 class TWINSModel(nn.Module):
-	def __init__(self, encoder):
+	def __init__(self):
 		super(TWINSModel, self).__init__()
 
 		self.maxpooling = nn.Sequential(
 
 			nn.MaxPool2d(kernel_size=(3,5), stride=(3,5)),
+			nn.Flatten()
 
 		)
 
@@ -375,7 +376,7 @@ class TWINSModel(nn.Module):
 		)
 
 		self.fc_block = nn.Sequential(
-			nn.Linear((256*15*7)+(420), 256),
+			nn.Linear((256*15*7)+(360), 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
@@ -388,6 +389,9 @@ class TWINSModel(nn.Module):
 	def forward(self, swmag, twins):
 
 		pooled = self.maxpooling(twins)
+		# pooled = pooled.view(-1, 1, 30, 12)
+
+		# x_input = torch.cat((swmag, reduced), dim=3)
 
 		swmag_output = self.cnn_block(swmag)
 
@@ -399,6 +403,28 @@ class TWINSModel(nn.Module):
 		output = torch.clamp(output, min=1e-9)
 
 		return output
+
+	
+	def predict(self, swmag, twins, return_numpy=False):
+
+		if not isinstance(swmag, torch.Tensor):
+			swmag = torch.tensor(swmag).to(DEVICE, dtype=torch.float)
+		if not isinstance(twins, torch.Tensor):
+			twins = torch.tensor(twins).to(DEVICE, dtype=torch.float)
+		
+		self.eval()
+		with torch.no_grad():
+			
+			output = self.forward(swmag, twins)
+
+		if return_numpy:
+			output = output.cpu().numpy()
+		
+		else:
+			output = output.cpu()
+		
+		return output
+
 
 
 class Early_Stopping():
@@ -807,20 +833,7 @@ def main():
 	torch.manual_seed(CONFIG['random_seed'])
 	torch.cuda.manual_seed(CONFIG['random_seed'])
 
-	autoencoder = Autoencoder()
-	saved_model = torch.load(f'models/autoencoder_pytorch_perceptual_v1-42.pt')
-	autoencoder.load_state_dict(saved_model['model'])
-
-	# getting jjsut the encoder part of the model
-	encoder = autoencoder.encoder
-
-	# freezing the encoder
-	for param in encoder.parameters():
-		param.requires_grad = False
-
-	print(f'Encoder: {encoder}')
-
-	model = TWINSModel(encoder=encoder)
+	model = TWINSModel()
 
 	# printing model summary
 	model.to(DEVICE)
@@ -831,7 +844,7 @@ def main():
 
 	# clearing the model so the best one can be loaded without overwhelming the gpu memory
 	model = None
-	model = TWINSModel(encoder=encoder)
+	model = TWINSModel()
 
 	# loading the best model version
 	final = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
@@ -850,7 +863,7 @@ def main():
 	print('Making predictions...')
 	results_df = evaluation(model, test, dates_dict['test'])
 	print(results_df.head())
-	results_df.to_feather(f'outputs/{TARGET}/non_twins_modeling_region_{REGION}_version_{VERSION}.feather')
+	results_df.to_feather(f'outputs/{TARGET}/twins_modeling_region_{REGION}_version_{VERSION}.feather')
 
 	# clearing the session to prevent memory leaks
 	gc.collect()

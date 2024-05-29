@@ -9,4 +9,4 @@ python3 twins_model_v_autoencoder.py --target 'rsd' --cluster 'greenland_cluster
 python3 twins_model_v_autoencoder.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-2'
 python3 twins_model_v_autoencoder.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-3'
 
-
+bash exe_twins_maxpooling_greenland.sh
