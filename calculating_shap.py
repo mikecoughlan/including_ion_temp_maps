@@ -563,11 +563,15 @@ def main():
 			dates_dict, features = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, model_type=MODEL_TYPE)
 		training_data, testing_data = [train_swmag, train_twins], [test_swmag, test_twins]
 	elif MODEL_TYPE == 'swmag':
-		xtrain, xval, xtest, ytrain, yval, ytest, \
+		xtrain, ytrain, xval, yval, xtest, ytest, \
 			dates_dict, features = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, model_type=MODEL_TYPE)
 		train_twins, val_twins, test_twins = None, None, None
 		training_data, testing_data = xtrain, xtest
 
+	print(f'size of xtrain: {xtrain.shape}')
+	print(f'size of ytrain: {ytrain.shape}')
+	print(f'size of xtest: {xtest.shape}')
+	print(f'size of ytest: {ytest.shape}')
 
 	print('Loading model....')
 	MODEL = loading_model()
