@@ -157,3 +157,6 @@ plots/
 models/
 data/
 outputs/
+
+# exempting pickle file
+cluster_dict.pkl
