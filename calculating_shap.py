@@ -212,6 +212,8 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 
 	print(f'length of train dates: {len(twins_train)}')
 
+	scaler_dict = {}
+
 	if model_type == 'twins':
 		# getting the mean and standard deviation of the twins training data
 		twins_scaling_array = np.vstack(twins_train).flatten()
@@ -227,6 +229,9 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 		twins_val = [twins_scaling(x, twins_mean, twins_std) for x in twins_val]
 		twins_test = [twins_scaling(x, twins_mean, twins_std) for x in twins_test]
 
+		scaler_dict['twins_mean'] = twins_mean
+		scaler_dict['twins_std'] = twins_std
+
 	swmag_scaling_array = pd.concat(x_train, axis=0)
 	scaler = StandardScaler()
 	scaler.fit(swmag_scaling_array)
@@ -235,10 +240,14 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 		x_val = [scaler.transform(x) for x in x_val]
 		x_test = [scaler.transform(x) for x in x_test]
 
-
 	print(f'shape of x_train: {len(x_train)}')
 	print(f'shape of x_val: {len(x_val)}')
 	print(f'shape of x_test: {len(x_test)}')
+
+	scaler_dict['swmag_scaler'] = scaler
+
+	with open(f'outputs/scalers/{model_type}_{region}_{VERSION}.pkl', 'wb') as f:
+		pickle.dump(scaler_dict, f)
 
 	if model_type == 'twins':
 		# splitting the sequences for input to the CNN
@@ -268,7 +277,6 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 	date_dict['test'].reset_index(drop=True, inplace=True)
 
 	print(f'Total training dates: {len(date_dict["train"])}')
-
 
 	if model_type == 'twins':
 		return torch.tensor(x_train).unsqueeze(1), torch.tensor(twins_train).unsqueeze(1), torch.tensor(y_train), \
@@ -341,12 +349,7 @@ def get_shap_values(model, model_name, training_data, testing_data, background_e
 	if isinstance(training_data, list):
 		print('Training data is a list....')
 		random_indicies = np.random.choice(training_data[0].shape[0], background_examples, replace=False)
-		print(random_indicies)
-		print(training_data[0].shape)
-		print(training_data[1].shape)
-		print(len(training_data))
 		for data in training_data:
-			print(data.shape)
 			background.append(data[random_indicies].to(DEVICE, dtype=torch.float))
 
 		explainer = shap.DeepExplainer(model, background)
@@ -384,7 +387,7 @@ def get_shap_values(model, model_name, training_data, testing_data, background_e
 		raise ValueError('The training data must be a numpy array or a list of arrays.')
 
 
-	return shap_values
+	return shap_values, explainer.expected_value
 
 
 def converting_shap_to_percentages(shap_values, features):
@@ -552,8 +555,8 @@ def main():
 
 	feature_importance_dict = {}
 
-	if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
-		raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
+	# if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
+	# 	raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
 
 
 	print(f'Preparing data....')
@@ -568,6 +571,9 @@ def main():
 		train_twins, val_twins, test_twins = None, None, None
 		training_data, testing_data = xtrain, xtest
 
+	if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
+		raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
+
 	print(f'size of xtrain: {xtrain.shape}')
 	print(f'size of ytrain: {ytrain.shape}')
 	print(f'size of xtest: {xtest.shape}')
@@ -577,7 +583,7 @@ def main():
 	MODEL = loading_model()
 
 	print('Getting shap values....')
-	shap_values = get_shap_values(model=MODEL, model_name=f'{REGION}_{VERSION}', 
+	shap_values, expected_values = get_shap_values(model=MODEL, model_name=f'{REGION}_{VERSION}', 
 									training_data=training_data, 
 									testing_data=testing_data, 
 									background_examples=1000)
@@ -590,7 +596,8 @@ def main():
 						'twins_test':twins_test,
 						'ytest':ytest,
 						'Date_UTC':dates_dict['test'],
-						'features':features}
+						'features':features,
+						'expected_values': expected_values}
 
 
 	with open(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl', 'wb') as f:
