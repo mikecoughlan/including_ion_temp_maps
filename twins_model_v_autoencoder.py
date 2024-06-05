@@ -442,7 +442,7 @@ class TWINSModel(nn.Module):
 			nn.MaxPool2d(kernel_size=2, stride=2),
 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
-			# nn.Flatten(),
+			nn.Flatten(),
 		)
 
 		self.fc_block = nn.Sequential(
@@ -461,6 +461,8 @@ class TWINSModel(nn.Module):
 		encoded = self.encoder(twins)
 
 		swmag_output = self.cnn_block(swmag)
+		
+		# swmag_output = swmag_output.view(-1, 1, 15*7)
 
 		x_input = torch.cat((swmag_output, encoded), dim=1)
 
