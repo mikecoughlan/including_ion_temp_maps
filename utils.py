@@ -433,8 +433,6 @@ class RegionPreprocessing():
 			df = self.loading_supermag(stat)
 			self.lons_dict[stat] = df['GEOLON'].loc[df['GEOLON'].first_valid_index()]
 			df = df[start_time:end_time]
-			print(f'Station: {stat}')
-			print(f'Nan values: {df.isnull().sum()}')
 			self.mlt_df[stat] = df['MLT']
 			if self.features is not None:
 				for feature in self.features:
