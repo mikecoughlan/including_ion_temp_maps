@@ -231,15 +231,6 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'val ratio: {new_y_val.sum()/len(new_y_val)}')
 	print(f'test ratio: {new_y_test.sum()/len(new_y_test)}')
 
-	fig, axes = plt.subplots(1,1, figsize=(10,5))
-	axes.plot(new_train.index, new_train['cosMLT'])
-	axes.plot(new_val.index, new_val['cosMLT'])
-	axes.plot(new_test.index, new_test['cosMLT'])
-	axes.set_xlim(pd.to_datetime('2012-03-01 00:00:00'),pd.to_datetime('2012-04-01 00:00:00'))
-	axes.set_title('Cosine of MLT')
-	plt.show()
-
-	raise ValueError('Stop here!')
 
 	print(f'new train: {new_train.isnull().sum()}')
 	print(f'new val: {new_val.isnull().sum()}')
