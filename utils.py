@@ -698,7 +698,7 @@ def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=F
 		return storms, y
 
 
-def split_sequences(sequences, targets=None, n_steps=30, include_target=True, dates=None, model_type='classification', maps=None):
+def split_sequences(sequences, targets=None, n_steps=30, include_target=True, dates=None, model_type='classification', maps=None, oversample=False, oversample_percentage=1):
 	'''
 		Takes input from the input array and creates the input and target arrays that can go into the models.
 
@@ -746,6 +746,13 @@ def split_sequences(sequences, targets=None, n_steps=30, include_target=True, da
 			X.append(seq_x)
 			if maps is not None:
 				twins_maps.append(twins)
+			if oversample:
+				if (seq_y1 == 1) or (seq_y == [0,1]):
+					if np.random.rand() <= oversample_percentage:
+						X.append(seq_x)
+						y.append(seq_y1)
+						if twins is not None:
+							twins_maps.append(twins) 
 			index_to_drop += 1
 
 	return np.array(X), np.array(y), to_drop, np.array(twins_maps)
