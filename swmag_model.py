@@ -266,6 +266,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression', oversample=False)
 
 	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
+	print('Shape of xtrain after oversampling: '+str(x_train.shape))
 
 	# dropping the dates that correspond to arrays that would have had nan values
 	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)

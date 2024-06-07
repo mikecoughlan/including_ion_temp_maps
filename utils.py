@@ -745,7 +745,7 @@ def split_sequences(sequences, targets=None, n_steps=30, include_target=True, da
 			if maps is not None:
 				twins_maps.append(twins)
 			if oversample:
-				if (seq_y1 == 1) or (seq_y == [0,1]):
+				if (seq_y1 == 1) or (seq_y1.ndim == 2 and seq_y1[1] == 1):
 					if np.random.rand() <= oversample_percentage:
 						X.append(seq_x)
 						y.append(seq_y1)

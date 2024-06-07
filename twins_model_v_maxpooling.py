@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 TARGET = 'rsd'
-VERSION = 'twins_v_maxpooling'
+VERSION = 'twins_v_maxpooling_oversampling'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -263,13 +263,13 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# splitting the sequences for input to the CNN
 	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'],
-																				dates=date_dict['train'], model_type='regression')
+																				dates=date_dict['train'], model_type='regression', oversample=True)
 
 	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'],
-																		dates=date_dict['val'], model_type='regression')
+																		dates=date_dict['val'], model_type='regression', oversample=True)
 
 	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'],
-																			dates=date_dict['test'], model_type='regression')
+																			dates=date_dict['test'], model_type='regression', oversample=False)
 
 	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
 

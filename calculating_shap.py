@@ -574,10 +574,19 @@ def main():
 	if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
 		raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
 
-	print(f'size of xtrain: {xtrain.shape}')
-	print(f'size of ytrain: {ytrain.shape}')
-	print(f'size of xtest: {xtest.shape}')
-	print(f'size of ytest: {ytest.shape}')
+	if MODEL_TYPE == 'swmag':
+		print(f'size of xtrain: {xtrain.shape}')
+		print(f'size of ytrain: {ytrain.shape}')
+		print(f'size of xtest: {xtest.shape}')
+		print(f'size of ytest: {ytest.shape}')
+	
+	else:
+		print(f'size of train_swmag: {train_swmag.shape}')
+		print(f'size of train_twins: {train_twins.shape}')
+		print(f'size of ytrain: {ytrain.shape}')
+		print(f'size of test_swmag: {test_swmag.shape}')
+		print(f'size of test_twins: {test_twins.shape}')
+		print(f'size of ytest: {ytest.shape}')
 
 	print('Loading model....')
 	MODEL = loading_model()
@@ -592,8 +601,7 @@ def main():
 		twins_test=None
 
 	evaluation_dict = {'shap_values':shap_values, 
-						'xtest':xtest,
-						'twins_test':twins_test,
+						'testing_data':testing_data,
 						'ytest':ytest,
 						'Date_UTC':dates_dict['test'],
 						'features':features,
