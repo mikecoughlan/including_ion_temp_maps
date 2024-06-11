@@ -361,7 +361,7 @@ class TWINSModel(nn.Module):
 		self.maxpooling = nn.Sequential(
 
 			nn.MaxPool2d(kernel_size=(3,5), stride=(3,5)),
-			nn.Flatten()
+			# nn.Flatten()
 
 		)
 
@@ -372,7 +372,7 @@ class TWINSModel(nn.Module):
 			nn.MaxPool2d(kernel_size=2, stride=2),
 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
 			nn.ReLU(),
-			nn.Flatten(),
+			# nn.Flatten(),
 		)
 
 		self.fc_block = nn.Sequential(
@@ -389,11 +389,12 @@ class TWINSModel(nn.Module):
 	def forward(self, swmag, twins):
 
 		pooled = self.maxpooling(twins)
-		# pooled = pooled.view(-1, 1, 30, 12)
+		pooled = torch.reshape(pooled, (-1, 30*12))
 
 		# x_input = torch.cat((swmag, reduced), dim=3)
 
 		swmag_output = self.cnn_block(swmag)
+		swmag_output = torch.reshape(swmag_output, (-1, 256*15*7))
 
 		x_input = torch.cat((swmag_output, pooled), dim=1)
 

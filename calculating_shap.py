@@ -317,9 +317,9 @@ def loading_model(auto_or_max='auto'):
 		raise ValueError('The model type must be either twins or swmag.')
 
 	checkpoint = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
-	new_keys = ['conv_block.0.weight', 'conv_block.0.bias', 'conv_block.3.weight', 'conv_block.3.bias',
-						'linear_block.0.weight', 'linear_block.0.bias', 'linear_block.3.weight', 'linear_block.3.bias', 'linear_block.6.weight', 'linear_block.6.bias']
-	checkpoint['model'] = {new_key:value for new_key, value in zip(new_keys, checkpoint['model'].values())}
+	# new_keys = ['conv_block.0.weight', 'conv_block.0.bias', 'conv_block.3.weight', 'conv_block.3.bias',
+	# 					'linear_block.0.weight', 'linear_block.0.bias', 'linear_block.3.weight', 'linear_block.3.bias', 'linear_block.6.weight', 'linear_block.6.bias']
+	# checkpoint['model'] = {new_key:value for new_key, value in zip(new_keys, checkpoint['model'].values())}
 	model.load_state_dict(checkpoint['model'])
 	model.to(DEVICE)
 	model.eval()
@@ -589,7 +589,7 @@ def main():
 		print(f'size of ytest: {ytest.shape}')
 
 	print('Loading model....')
-	MODEL = loading_model()
+	MODEL = loading_model(auto_or_max='max')
 
 	print('Getting shap values....')
 	shap_values, expected_values = get_shap_values(model=MODEL, model_name=f'{REGION}_{VERSION}', 
