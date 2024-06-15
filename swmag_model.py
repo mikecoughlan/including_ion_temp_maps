@@ -372,24 +372,24 @@ class SWMAG(nn.Module):
 		x = torch.clamp(x, min=1e-9)
 
 		return x
-	
-	def predict(self, x, return_numpy=False):
 
-		if not isinstance(x, torch.Tensor):
-			x = torch.tensor(x).to(DEVICE, dtype=torch.float)
-		
-		self.eval()
-		with torch.no_grad():
-			
-			output = self.forward(x)
+	# def predict(self, x, return_numpy=False):
 
-		if return_numpy:
-			output = output.cpu().numpy()
-		
-		else:
-			output = output.cpu()
-		
-		return output
+	# 	if not isinstance(x, torch.Tensor):
+	# 		x = torch.tensor(x).to(DEVICE, dtype=torch.float)
+
+	# 	self.eval()
+	# 	with torch.no_grad():
+
+	# 		output = self.forward(x)
+
+	# 	if return_numpy:
+	# 		output = output.cpu().numpy()
+
+	# 	else:
+	# 		output = output.cpu()
+
+	# 	return output
 
 
 class Early_Stopping():
@@ -797,7 +797,7 @@ def main():
 	print('yval shape: '+str(yval.shape))
 	print('ytest shape: '+str(ytest.shape))
 
-	with open(f'outputs/dates_dict_rregion_{REGION}_version_{VERSION}.pkl', 'wb') as f:
+	with open(f'outputs/dates_dict_region_{REGION}_version_{VERSION}.pkl', 'wb') as f:
 		pickle.dump(dates_dict, f)
 
 
