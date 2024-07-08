@@ -93,9 +93,11 @@ def loading_twins_maps(full_map=False):
 	twins_files = sorted(glob.glob(twins_dir+'*.cdf', recursive=True))
 
 	maps = {}
-
+	total_maps=0
 	for file in twins_files:
 		twins_map = pycdf.CDF(file)
+		total_maps += len(twins_map['Epoch'])
+		print(f'File: {file}\tMaps: {len(twins_map["Epoch"])}')
 		for i, date in enumerate(twins_map['Epoch']):
 			if full_map:
 				if len(np.unique(twins_map['Ion_Temperature'][i])) == 1:
@@ -110,7 +112,8 @@ def loading_twins_maps(full_map=False):
 					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')]['map'] = twins_map['Ion_Temperature'][i]
 				else:
 					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')]['map'] = twins_map['Ion_Temperature'][i][35:125,50:110]
-
+	print(f'Total maps: {total_maps}')
+	raise ValueError('Check the maps')
 	return maps
 
 
