@@ -10,6 +10,7 @@ from multiprocessing import Manager, Pool
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy.io
 # import shapely
 from dateutil import parser
 # from geopack import geopack, t89
@@ -18,7 +19,7 @@ from matplotlib.collections import PatchCollection
 from matplotlib.colors import Normalize
 from matplotlib.patches import Circle, Wedge
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler, StandardScaler, OneHotEncoder
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
 from spacepy import pycdf
 from tqdm import tqdm
 
@@ -81,7 +82,7 @@ def loading_supermag(station):
 	return df
 
 
-def loading_twins_maps(full_map=False):
+def loading_twins_maps(full_map=False, binary_flag=False):
 	'''
 	Loads the twins maps
 
@@ -91,11 +92,15 @@ def loading_twins_maps(full_map=False):
 
 	times = pd.read_feather('outputs/regular_twins_map_dates.feather')
 	twins_files = sorted(glob.glob(twins_dir+'*.cdf', recursive=True))
+	binary_flag_files = sorted(glob.glob(twins_dir+'twins_binary_flags/*.mat', recursive=True))
 
 	maps = {}
 	total_maps=0
-	for file in twins_files:
+
+	for i ,file in enumerate(twins_files):
 		twins_map = pycdf.CDF(file)
+		if binary_flag:
+			binary_flag_file = scipy.io.loadmat(binary_flag_files[i])
 		total_maps += len(twins_map['Epoch'])
 		print(f'File: {file}\tMaps: {len(twins_map["Epoch"])}')
 		for i, date in enumerate(twins_map['Epoch']):
@@ -371,7 +376,7 @@ class RegionPreprocessing():
 				else:
 					stime.append(date.round('T')-pd.Timedelta(minutes=30))
 					etime.append(date.round('T')+pd.Timedelta(minutes=9))
-			
+
 			for start, end in zip(stime, etime):		# looping through the storms to remove the data from the larger df
 				if start < temp_df.index[0] or end > temp_df.index[-1]:						# if the storm is outside the range of the data, skip it
 					continue
@@ -382,7 +387,7 @@ class RegionPreprocessing():
 
 			all_storms = pd.concat(storms, axis=0)
 			storm.reset_index(drop=True, inplace=True)		# resetting the storm index and simultaniously dropping the date so it doesn't get trained on
-			
+
 
 			# self.mlt_df['mix'] = self.mlt_df.median(axis=1)
 			missing_mlt = temp_df.isnull().sum()
@@ -676,7 +681,7 @@ def storm_extract(df, lead=24, recovery=48, sw_only=False, twins=False, target=F
 		if len(storm) != 0:
 			if target:
 				if classification:
-					y.append(ohe.transform(storm[target_var].values.reshape(-1,1)).toarray())	
+					y.append(ohe.transform(storm[target_var].values.reshape(-1,1)).toarray())
 
 				else:
 					y.append(storm[target_var].values)
@@ -753,7 +758,7 @@ def split_sequences(sequences, targets=None, n_steps=30, include_target=True, da
 						X.append(seq_x)
 						y.append(seq_y1)
 						if twins is not None:
-							twins_maps.append(twins) 
+							twins_maps.append(twins)
 			index_to_drop += 1
 
 	return np.array(X), np.array(y), to_drop, np.array(twins_maps)
