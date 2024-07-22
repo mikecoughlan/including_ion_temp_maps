@@ -76,12 +76,11 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 
 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
 
-	# loading the TWINS maps
-	maps = utils.loading_twins_maps()
+	maps = utils.loading_filtered_twins_maps()
 
 	# changing all negative values in maps to 0
 	for key in maps.keys():
-		maps[key]['map'][maps[key]['map'] < 0] = 0
+		maps[key][maps[key] < 0] = 0
 
 
 	return merged_df, thresholds, maps
@@ -187,19 +186,19 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 			x_train.append(storm)
 			y_train.append(y)
 			if model_type=='twins':
-				twins_train.append(maps[twins]['map'])
+				twins_train.append(maps[twins])
 			date_dict['train'] = pd.concat([date_dict['train'], copied_storm['Date_UTC'][-10:]], axis=0)
 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in val_dates_df.index:
 			x_val.append(storm)
 			y_val.append(y)
 			if model_type=='twins':
-				twins_val.append(maps[twins]['map'])
+				twins_val.append(maps[twins])
 			date_dict['val'] = pd.concat([date_dict['val'], copied_storm['Date_UTC'][-10:]], axis=0)
 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in test_dates_df.index:
 			x_test.append(storm)
 			y_test.append(y)
 			if model_type=='twins':
-				twins_test.append(maps[twins]['map'])
+				twins_test.append(maps[twins])
 			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
 
 	date_dict['train'].reset_index(drop=True, inplace=True)

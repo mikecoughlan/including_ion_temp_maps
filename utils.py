@@ -121,6 +121,59 @@ def loading_twins_maps(full_map=False, binary_flag=False):
 	raise ValueError('Check the maps')
 	return maps
 
+def loading_filtered_twins_maps(full_map=False, filter='coverage'):
+
+	twins_files = sorted(glob.glob(twins_dir+'twins_alt/*mat', recursive=True))
+	date_files = sorted(glob.glob(twins_dir+'twins_dates/*mat', recursive=True))
+	if filter == 'coverage':
+		filter_files = sorted(glob.glob(twins_dir+'twins_coverage_flags/*mat', recursive=True))
+	elif filter == 'binary':
+		filter_files = sorted(glob.glob(twins_dir+'twins_binary_flags/*mat', recursive=True))
+	elif filter == 'count':
+		filter_files = sorted(glob.glob(twins_dir+'twins_count_flags/*mat', recursive=True))
+	else:
+		raise ValueError('Must specify a valid filter. Options are "coverage", "binary", and "count".')
+	maps, dates, filters = [], [], []
+	for file in twins_files:
+		twins_maps = scipy.io.loadmat(file)
+		maps.append(twins_maps['Data'])
+	for file in filter_files:
+		filt = scipy.io.loadmat(file)
+		filters.append(filt['Data'])
+	for file in date_files:
+		date = scipy.io.loadmat(file)
+		dates.append(date['Data'])
+
+	maps = np.concatenate(maps, axis=2)
+	filters = np.concatenate(filters, axis=1)
+	dates = np.concatenate(dates, axis=0)
+
+	maps = maps.reshape((maps.shape[2], maps.shape[0], maps.shape[1]))
+	filters = filters.reshape((filters.shape[1],))
+	dates = dates.reshape((dates.shape[0],))
+
+	# using the coverage filter to filter out the maps and dates
+	if filter == 'coverage':
+		flag = filters>=3
+	elif filter == 'binary':
+		flag = filters==0
+	elif filter == 'count':
+		flag = filters<7
+	else:
+		raise ValueError('How did you get this far?')
+
+	if not full_map:
+		maps = maps[flag,35:125,50:110]
+	else:
+		maps = maps[flag,:,:]
+
+	dates = dates[flag]
+
+	dates = pd.to_datetime(dates-719529, unit='D').round('min')
+	map_dict = {date.strftime(format='%Y-%m-%d %H:%M:%S'): ion_temps for date, ion_temps in zip(dates, maps)}
+
+	return map_dict
+
 
 def loading_solarwind(omni=False, limit_to_twins=False):
 	'''
