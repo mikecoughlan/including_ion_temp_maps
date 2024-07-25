@@ -102,7 +102,6 @@ def loading_twins_maps(full_map=False, binary_flag=False):
 		if binary_flag:
 			binary_flag_file = scipy.io.loadmat(binary_flag_files[i])
 		total_maps += len(twins_map['Epoch'])
-		print(f'File: {file}\tMaps: {len(twins_map["Epoch"])}')
 		for i, date in enumerate(twins_map['Epoch']):
 			if full_map:
 				if len(np.unique(twins_map['Ion_Temperature'][i])) == 1:
@@ -117,8 +116,9 @@ def loading_twins_maps(full_map=False, binary_flag=False):
 					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')]['map'] = twins_map['Ion_Temperature'][i]
 				else:
 					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')]['map'] = twins_map['Ion_Temperature'][i][35:125,50:110]
+	
 	print(f'Total maps: {total_maps}')
-	raise ValueError('Check the maps')
+	
 	return maps
 
 def loading_filtered_twins_maps(full_map=False, filter='coverage'):
@@ -148,8 +148,9 @@ def loading_filtered_twins_maps(full_map=False, filter='coverage'):
 	filters = np.concatenate(filters, axis=1)
 	dates = np.concatenate(dates, axis=0)
 
-	maps = maps.reshape((maps.shape[2], maps.shape[0], maps.shape[1]))
-	filters = filters.reshape((filters.shape[1],))
+	maps = np.transpose(maps, (2,0,1))
+	filters = np.transpose(filters, (1,0))
+	filters = filters.reshape((filters.shape[0],))
 	dates = dates.reshape((dates.shape[0],))
 
 	# using the coverage filter to filter out the maps and dates
@@ -161,7 +162,6 @@ def loading_filtered_twins_maps(full_map=False, filter='coverage'):
 		flag = filters<7
 	else:
 		raise ValueError('How did you get this far?')
-
 	if not full_map:
 		maps = maps[flag,35:125,50:110]
 	else:
@@ -171,6 +171,7 @@ def loading_filtered_twins_maps(full_map=False, filter='coverage'):
 
 	dates = pd.to_datetime(dates-719529, unit='D').round('min')
 	map_dict = {date.strftime(format='%Y-%m-%d %H:%M:%S'): ion_temps for date, ion_temps in zip(dates, maps)}
+	# print([key for key in map_dict.keys()][3200:3300])
 
 	return map_dict
 

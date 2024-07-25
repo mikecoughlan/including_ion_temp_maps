@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 TARGET = 'rsd'
-VERSION = 'twins_alt_method_v_maxpooling_oversampling'
+VERSION = 'twins_alt_method_v2_maxpooling'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -100,7 +100,7 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 
 	# loading the TWINS maps
 	# maps = utils.loading_twins_maps()
-	maps = utils.loading_filtered_twins_maps()
+	maps = utils.loading_filtered_twins_maps(full_map=False)
 
 	# changing all negative values in maps to 0
 	for key in maps.keys():
@@ -264,10 +264,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# splitting the sequences for input to the CNN
 	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'],
-																				dates=date_dict['train'], model_type='regression', oversample=True)
+																				dates=date_dict['train'], model_type='regression', oversample=False)
 
 	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'],
-																		dates=date_dict['val'], model_type='regression', oversample=True)
+																		dates=date_dict['val'], model_type='regression', oversample=False)
 
 	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'],
 																			dates=date_dict['test'], model_type='regression', oversample=False)

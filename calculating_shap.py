@@ -82,7 +82,6 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 	for key in maps.keys():
 		maps[key][maps[key] < 0] = 0
 
-
 	return merged_df, thresholds, maps
 
 
