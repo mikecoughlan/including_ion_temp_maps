@@ -73,8 +73,8 @@ CONFIG = {'time_history':30,
 			'batch_size':128}
 
 
-TARGET = 'rsd'
-VERSION = 'twins_alt_method_v2_maxpooling'
+# TARGET = 'rsd'
+VERSION = 'twins_v_dbht_maxpooling_oversampling'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -132,10 +132,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	merged_df, thresholds, maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
 
 	# target = merged_df['classification']
-	target = merged_df[f'rolling_{target_var}']
+	# target = merged_df[f'rolling_{target_var}']
 
 	# reducing the dataframe to only the features that will be used in the model plus the target variable
-	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+	vars_to_keep = ['classification', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
 					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
 	merged_df = merged_df[vars_to_keep]
 
@@ -264,10 +264,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# splitting the sequences for input to the CNN
 	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'],
-																				dates=date_dict['train'], model_type='regression', oversample=False)
+																				dates=date_dict['train'], model_type='regression', oversample=True)
 
 	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'],
-																		dates=date_dict['val'], model_type='regression', oversample=False)
+																		dates=date_dict['val'], model_type='regression', oversample=True)
 
 	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'],
 																			dates=date_dict['test'], model_type='regression', oversample=False)
@@ -355,6 +355,58 @@ class CRSP(nn.Module):
 		return crps
 
 
+# class TWINSModel(nn.Module):
+# 	def __init__(self):
+# 		# this on is the RSD model
+# 		super(TWINSModel, self).__init__()
+
+# 		self.maxpooling = nn.Sequential(
+
+# 			nn.MaxPool2d(kernel_size=(3,5), stride=(3,5)),
+# 			# nn.Flatten()
+
+# 		)
+
+# 		self.cnn_block = nn.Sequential(
+
+# 			nn.Conv2d(in_channels=1, out_channels=128, kernel_size=2, stride=1, padding='same'),
+# 			nn.ReLU(),
+# 			nn.MaxPool2d(kernel_size=2, stride=2),
+# 			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=2, stride=1, padding='same'),
+	# 		nn.ReLU(),
+	# 		# nn.Flatten(),
+	# 	)
+
+	# 	self.fc_block = nn.Sequential(
+	# 		nn.Linear((256*15*7)+(360), 256),
+	# 		nn.ReLU(),
+	# 		nn.Dropout(0.2),
+	# 		nn.Linear(256, 128),
+	# 		nn.ReLU(),
+	# 		nn.Dropout(0.2),
+	# 		nn.Linear(128, 2),
+	# 		nn.Sigmoid()
+	# 	)
+
+	# def forward(self, swmag, twins):
+
+	# 	pooled = self.maxpooling(twins)
+	# 	pooled = torch.reshape(pooled, (-1, 30*12))
+
+	# 	# x_input = torch.cat((swmag, reduced), dim=3)
+
+	# 	swmag_output = self.cnn_block(swmag)
+	# 	swmag_output = torch.reshape(swmag_output, (-1, 256*15*7))
+
+	# 	x_input = torch.cat((swmag_output, pooled), dim=1)
+
+	# 	output = self.fc_block(x_input)
+
+	# 	# clipping to avoid values too small for backprop
+	# 	output = torch.clamp(output, min=1e-9)
+
+	# 	return output
+
 class TWINSModel(nn.Module):
 	def __init__(self):
 		super(TWINSModel, self).__init__()
@@ -377,7 +429,7 @@ class TWINSModel(nn.Module):
 		)
 
 		self.fc_block = nn.Sequential(
-			nn.Linear((256*15*7)+(360), 256),
+			nn.Linear((256*15*6)+(360), 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
@@ -395,7 +447,7 @@ class TWINSModel(nn.Module):
 		# x_input = torch.cat((swmag, reduced), dim=3)
 
 		swmag_output = self.cnn_block(swmag)
-		swmag_output = torch.reshape(swmag_output, (-1, 256*15*7))
+		swmag_output = torch.reshape(swmag_output, (-1, 256*15*6))
 
 		x_input = torch.cat((swmag_output, pooled), dim=1)
 

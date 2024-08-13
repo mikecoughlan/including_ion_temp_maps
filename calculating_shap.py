@@ -106,9 +106,6 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 
 	merged_df, thresholds, maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
 
-	# target = merged_df['classification']
-	target = merged_df[f'rolling_{target_var}']
-
 	# reducing the dataframe to only the features that will be used in the model plus the target variable
 	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
 					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
