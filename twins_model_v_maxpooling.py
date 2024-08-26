@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 # TARGET = 'rsd'
-VERSION = 'twins_v_dbht_maxpooling_oversampling'
+VERSION = 'twins_alt_method_v3_maxpooling_oversampling'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -150,7 +150,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# if not, calculating the twins maps and extracting the storms
 	else:
-		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False)
+		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False, map_keys=maps.keys())
 		storms_extracted_dict = {'storms':storms, 'target':target}
 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
@@ -162,7 +162,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	features = storms[0].columns
 
 	# splitting the data on a day to day basis to reduce data leakage
-	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2017-12-01'), freq='D')
+	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2018-12-31'), freq='D')
 	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
 
 	day_df = day_df.drop(specific_test_days)
@@ -225,6 +225,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	date_dict['train'].reset_index(drop=True, inplace=True)
 	date_dict['val'].reset_index(drop=True, inplace=True)
 	date_dict['test'].reset_index(drop=True, inplace=True)
+
 
 	date_dict['train'].rename(columns={date_dict['train'].columns[0]:'Date_UTC'}, inplace=True)
 	date_dict['val'].rename(columns={date_dict['val'].columns[0]:'Date_UTC'}, inplace=True)
