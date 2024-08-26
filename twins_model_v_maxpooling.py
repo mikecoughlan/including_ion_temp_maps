@@ -517,7 +517,7 @@ class TWINSModel(nn.Module):
 		)
 
 		self.fc_block = nn.Sequential(
-			nn.Linear((256*15*6)+(360), 256),
+			nn.Linear((256*15*7)+(360), 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
@@ -535,7 +535,7 @@ class TWINSModel(nn.Module):
 		# x_input = torch.cat((swmag, reduced), dim=3)
 
 		swmag_output = self.cnn_block(swmag)
-		swmag_output = torch.reshape(swmag_output, (-1, 256*15*6))
+		swmag_output = torch.reshape(swmag_output, (-1, 256*15*7))
 
 		x_input = torch.cat((swmag_output, pooled), dim=1)
 
