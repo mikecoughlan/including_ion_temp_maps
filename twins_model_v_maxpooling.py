@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 # TARGET = 'rsd'
-VERSION = 'twins_alt_method_v3_maxpooling_oversampling'
+VERSION = 'twins_alt_v_accrue'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -135,7 +135,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	# target = merged_df[f'rolling_{target_var}']
 
 	# reducing the dataframe to only the features that will be used in the model plus the target variable
-	vars_to_keep = ['classification', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
 					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
 	merged_df = merged_df[vars_to_keep]
 
@@ -265,10 +265,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# splitting the sequences for input to the CNN
 	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'],
-																				dates=date_dict['train'], model_type='regression', oversample=True)
+																				dates=date_dict['train'], model_type='regression', oversample=False)
 
 	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'],
-																		dates=date_dict['val'], model_type='regression', oversample=True)
+																		dates=date_dict['val'], model_type='regression', oversample=False)
 
 	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'],
 																			dates=date_dict['test'], model_type='regression', oversample=False)
@@ -354,6 +354,93 @@ class CRSP(nn.Module):
 		# crps = sig * ((epsilon / sig) * torch.erf((epsilon / (np.sqrt(2) * sig))) + torch.sqrt(torch.tensor(2 / np.pi)) * torch.exp(-epsilon ** 2 / (2 * sig ** 2)) - 1 / torch.sqrt(torch.tensor(np.pi)))
 
 		return crps
+
+
+class ACCRUE(nn.Module):
+	''' Defining the ACCRUE cost function from Camporeale & Care (2020)'''
+	def __init__(self):
+		super(ACCRUE, self).__init__()
+	
+	def forward(self, y_pred, y_true):
+		# splitting the y_pred tensor into mean and std
+		mean, std = torch.unbind(y_pred, dim=-1)
+
+		# getting the length of the input tensors
+		N = len(y_true)
+
+		# making the arrays the right dimensions
+		mean = mean.unsqueeze(-1)
+		std = std.unsqueeze(-1)
+		y_true = y_true.unsqueeze(-1)
+
+		# calculating the error
+		crps = torch.mean(self.calculate_crps(self.epsilon_error(y_true, mean), std))
+		rs = self.calculate_rs(self.eta(y_true, mean, std), N)
+		beta = self.beta(self.epsilon_error(y_true, mean), N)
+
+		accrue = torch.add(torch.mul(crps, beta), torch.mul(rs, torch.sub(1, beta)))
+
+		return accrue
+
+
+	def epsilon_error(self, y, u):
+
+		epsilon = torch.abs(y - u)
+
+		return epsilon
+
+
+	def eta(self, y, u, sig):
+
+		eta = torch.div(self.epsilon_error(y,u), torch.mul(torch.sqrt(2), sig))
+
+		return eta
+
+
+	def calculate_crps(self, epsilon, sig):
+
+		crps = torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
+								torch.sub(torch.mul(torch.sqrt(torch.div(2, np.pi)), torch.exp(torch.div(torch.mul(-1, torch.pow(epsilon, 2)), \
+								(torch.mul(2, torch.pow(sig, 2)))))), torch.div(1, torch.sqrt(torch.tensor(np.pi)))))))
+		
+		return crps
+
+	
+	def calculate_rs(self, eta, N):
+		''' Function to calculate the reliability score of the model'''
+
+		# getting a tensor that contains numbers 1 to N
+		i = torch.sub(torch.mul(2,torch.arange(1, N+1)),1)
+
+		rs = torch.sub(torch.mean(torch.add(torch.mul(eta, torch.add(torch.erf(eta),1)), \
+						torch.mul(-1, torch.div(eta, N), i),
+						torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.sqrt(np.pi)))),\
+						torch.div(1, torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
+		
+		return rs
+
+	def crps_min(self, epsilon, N):
+		''' Function to calculate the theoretical minimum CRPS of the model'''
+		
+		crps_min = torch.mul(torch.div(torch.sqrt(torch.log(4)), torch.mul(2,N)), torch.sum(epsilon))
+
+		return crps_min
+	
+
+	def rs_min(self, N):
+
+		i = torch.div(torch.sub(torch.mul(2,torch.arange(1, N+1)),1),N)
+
+		rs_min = torch.sub((torch.mul(torch.div(1,torch.sqrt(np.pi)), \
+							torch.mean(torch.exp(torch.mul(-1, torch.pow(torch.erfinv(i),2)))))), \
+							torch.div(1,torch.mul(2,torch.sqrt(np.pi))))
+		
+		return rs_min
+
+	
+	def beta(self, epsilon, N):
+
+		return torch.div(rs_min(N), torch.sum(crps_min(epsilon, N), rs_min(N)))
 
 
 # class TWINSModel(nn.Module):
@@ -646,7 +733,8 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		model.to(DEVICE)
 
 		# defining the loss function and the optimizer
-		criterion = CRSP()
+		# criterion = CRSP()
+		criterion = ACCRUE()
 		optimizer = optim.Adam(model.parameters(), lr=1e-7)
 
 		# initalizing the early stopping class
