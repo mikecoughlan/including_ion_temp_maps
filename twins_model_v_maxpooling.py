@@ -71,11 +71,11 @@ CONFIG = {'time_history':30,
 			'epochs':500,
 			'loss':'mse',
 			'early_stop_patience':25,
-			'batch_size':128}
+			'batch_size':1024}
 
 
 # TARGET = 'rsd'
-VERSION = 'twins_alt_v3_accrue'
+VERSION = 'twins_alt_v6_accrue'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -362,12 +362,9 @@ class ACCRUE(nn.Module):
 	def __init__(self):
 		super(ACCRUE, self).__init__()
 	
-	def forward(self, y_pred, y_true):
+	def forward(self, y_pred, y_true, N):
 		# splitting the y_pred tensor into mean and std
 		mean, std = torch.unbind(y_pred, dim=-1)
-
-		# getting the length of the input tensors
-		N = len(y_true)
 
 		# making the arrays the right dimensions
 		mean = mean.unsqueeze(-1)
@@ -377,8 +374,8 @@ class ACCRUE(nn.Module):
 		# calculating the error
 		crps = torch.mean(self.calculate_crps(self.epsilon_error(y_true, mean), std))
 		rs = self.calculate_rs(self.eta(y_true, mean, std), N)
-		# beta = self.calculate_beta(self.epsilon_error(y_true, mean), N)
-		beta = 0.5
+		beta = self.calculate_beta(self.epsilon_error(y_true, mean), N)
+		# beta = 0.5
 
 
 		accrue = torch.add(torch.mul(crps, beta), torch.mul(rs, torch.sub(1, beta)))
@@ -419,10 +416,16 @@ class ACCRUE(nn.Module):
 		N = torch.tensor(N).to(DEVICE)
 		eta = eta.to(DEVICE)
 
-		rs = torch.sub(torch.mean(torch.add(torch.mul(eta, torch.add(torch.erf(eta),1)), \
+		# RS with triling terms
+		# rs = torch.sub(torch.mean(torch.add(torch.mul(eta, torch.add(torch.erf(eta),1)), \
+		# 				torch.add(torch.mul(torch.mul(-1, torch.div(eta, N)), i),
+		# 				torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.sqrt(torch.tensor(np.pi)))))),\
+		# 				torch.div(1, torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
+
+		# RS without trailing term
+		rs = torch.mean(torch.add(torch.mul(eta, torch.add(torch.erf(eta),1)), \
 						torch.add(torch.mul(torch.mul(-1, torch.div(eta, N)), i),
-						torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.sqrt(torch.tensor(np.pi)))))),\
-						torch.div(1, torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
+						torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.sqrt(torch.tensor(np.pi))))))
 		
 		return rs
 
@@ -437,9 +440,14 @@ class ACCRUE(nn.Module):
 
 		i = torch.sub(torch.div(torch.sub(torch.mul(2,torch.arange(1, N+1)),1),N),1)
 
-		rs_min = torch.sub((torch.mul(torch.div(1,torch.sqrt(torch.tensor(np.pi))), \
-							torch.mean(torch.exp(torch.mul(-1, torch.pow(torch.erfinv(i),2)))))), \
-							torch.div(1,torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
+		# RS with trailing terms
+		# rs_min = torch.sub((torch.mul(torch.div(1,torch.sqrt(torch.tensor(np.pi))), \
+		# 					torch.mean(torch.exp(torch.mul(-1, torch.pow(torch.erfinv(i),2)))))), \
+		# 					torch.div(1,torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
+
+		# RS without trailing terms
+		rs_min = (torch.mul(torch.div(1,torch.sqrt(torch.tensor(np.pi))), \
+							torch.mean(torch.exp(torch.mul(-1, torch.pow(torch.erfinv(i),2))))))
 		
 		return rs_min
 
@@ -723,6 +731,8 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	Returns:
 		object: the trained model
 	'''
+	N_train = len(train)*CONFIG['batch_size']
+	N_val = len(val)*CONFIG['batch_size']
 	optimizer = optim.Adam(model.parameters(), lr=1e-7)
 	# checking if the model has already been trained, loading it if it exists
 	if os.path.exists(f'models/{TARGET}/region_{REGION}_{VERSION}.pt'):
@@ -777,7 +787,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				output = output.squeeze()
 
 				# calculating the loss
-				loss = criterion(output, y)
+				loss = criterion(output, y, N_train)
 
 				# backward pass
 				optimizer.zero_grad()
@@ -812,7 +822,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 					# output = output.view(len(output),2)
 					output = output.squeeze()
 
-					val_loss = criterion(output, y)
+					val_loss = criterion(output, y, N_val)
 
 					# emptying the cuda cache
 					swmag = swmag.to('cpu')
