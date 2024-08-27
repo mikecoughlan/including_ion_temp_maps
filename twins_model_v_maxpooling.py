@@ -37,6 +37,7 @@ import torchvision
 import torchvision.transforms as transforms
 import tqdm
 from scipy.stats import boxcox
+from scipy import special
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -378,6 +379,7 @@ class ACCRUE(nn.Module):
 		rs = self.calculate_rs(self.eta(y_true, mean, std), N)
 		beta = self.beta(self.epsilon_error(y_true, mean), N)
 
+
 		accrue = torch.add(torch.mul(crps, beta), torch.mul(rs, torch.sub(1, beta)))
 
 		return accrue
@@ -392,7 +394,7 @@ class ACCRUE(nn.Module):
 
 	def eta(self, y, u, sig):
 
-		eta = torch.div(self.epsilon_error(y,u), torch.mul(torch.sqrt(2), sig))
+		eta = torch.div(self.epsilon_error(y,u), torch.mul(torch.sqrt(torch.tensor(2)), sig))
 
 		return eta
 
@@ -412,35 +414,43 @@ class ACCRUE(nn.Module):
 		# getting a tensor that contains numbers 1 to N
 		i = torch.sub(torch.mul(2,torch.arange(1, N+1)),1)
 
+		i = i.to(DEVICE)
+		N = torch.tensor(N).to(DEVICE)
+		eta = eta.to(DEVICE)
+
 		rs = torch.sub(torch.mean(torch.add(torch.mul(eta, torch.add(torch.erf(eta),1)), \
-						torch.mul(-1, torch.div(eta, N), i),
-						torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.sqrt(np.pi)))),\
+						torch.add(torch.mul(torch.mul(-1, torch.div(eta, N)), i),
+						torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.sqrt(torch.tensor(np.pi)))))),\
 						torch.div(1, torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
 		
 		return rs
 
 	def crps_min(self, epsilon, N):
 		''' Function to calculate the theoretical minimum CRPS of the model'''
-		
-		crps_min = torch.mul(torch.div(torch.sqrt(torch.log(4)), torch.mul(2,N)), torch.sum(epsilon))
+		crps_min = torch.mul(torch.div(torch.sqrt(torch.log(torch.tensor(4))), torch.mul(2,N)), torch.sum(epsilon))
 
 		return crps_min
 	
 
 	def rs_min(self, N):
 
-		i = torch.div(torch.sub(torch.mul(2,torch.arange(1, N+1)),1),N)
+		i = torch.sub(torch.div(torch.sub(torch.mul(2,torch.arange(1, N+1)),1),N),1)
 
-		rs_min = torch.sub((torch.mul(torch.div(1,torch.sqrt(np.pi)), \
+		rs_min = torch.sub((torch.mul(torch.div(1,torch.sqrt(torch.tensor(np.pi))), \
 							torch.mean(torch.exp(torch.mul(-1, torch.pow(torch.erfinv(i),2)))))), \
-							torch.div(1,torch.mul(2,torch.sqrt(np.pi))))
+							torch.div(1,torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
 		
 		return rs_min
 
 	
 	def beta(self, epsilon, N):
 
-		return torch.div(rs_min(N), torch.sum(crps_min(epsilon, N), rs_min(N)))
+		crps_min = self.crps_min(epsilon, N)
+		rs_min = self.rs_min(N)
+
+		beta = torch.div(crps_min, torch.add(crps_min, rs_min))
+
+		return beta
 
 
 # class TWINSModel(nn.Module):
