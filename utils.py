@@ -113,9 +113,9 @@ def loading_twins_maps(full_map=False, binary_flag=False):
 			if check in times.values:
 				maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')] = {}
 				if full_map:
-					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')]['map'] = twins_map['Ion_Temperature'][i]
+					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')] = twins_map['Ion_Temperature'][i]
 				else:
-					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')]['map'] = twins_map['Ion_Temperature'][i][35:125,50:110]
+					maps[check.round('T').strftime(format='%Y-%m-%d %H:%M:%S')] = twins_map['Ion_Temperature'][i][35:125,50:110]
 	
 	print(f'Total maps: {total_maps}')
 	

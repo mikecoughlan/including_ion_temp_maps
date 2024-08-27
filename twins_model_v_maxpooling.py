@@ -75,7 +75,7 @@ CONFIG = {'time_history':30,
 
 
 # TARGET = 'rsd'
-VERSION = 'twins_alt_v_accrue'
+VERSION = 'twins_alt_v3_accrue'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -377,7 +377,8 @@ class ACCRUE(nn.Module):
 		# calculating the error
 		crps = torch.mean(self.calculate_crps(self.epsilon_error(y_true, mean), std))
 		rs = self.calculate_rs(self.eta(y_true, mean, std), N)
-		beta = self.beta(self.epsilon_error(y_true, mean), N)
+		# beta = self.calculate_beta(self.epsilon_error(y_true, mean), N)
+		beta = 0.5
 
 
 		accrue = torch.add(torch.mul(crps, beta), torch.mul(rs, torch.sub(1, beta)))
@@ -443,7 +444,7 @@ class ACCRUE(nn.Module):
 		return rs_min
 
 	
-	def beta(self, epsilon, N):
+	def calculate_beta(self, epsilon, N):
 
 		crps_min = self.crps_min(epsilon, N)
 		rs_min = self.rs_min(N)
