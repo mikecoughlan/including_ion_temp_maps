@@ -67,7 +67,7 @@ print(f'Device: {DEVICE}')
 CONFIG = {'time_history':30,
 			'random_seed':42,
 			'filters':128,
-			'learning_rate':1e-7,
+			'learning_rate':1e-6,
 			'epochs':500,
 			'loss':'mse',
 			'early_stop_patience':25,
@@ -75,7 +75,7 @@ CONFIG = {'time_history':30,
 
 
 # TARGET = 'rsd'
-VERSION = 'twins_alt_v6_accrue'
+VERSION = 'twins_alt_v7_accrue'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
