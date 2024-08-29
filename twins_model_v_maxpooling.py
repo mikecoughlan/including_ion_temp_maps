@@ -67,15 +67,15 @@ print(f'Device: {DEVICE}')
 CONFIG = {'time_history':30,
 			'random_seed':42,
 			'filters':128,
-			'learning_rate':1e-6,
+			'learning_rate':1e-7,
 			'epochs':500,
 			'loss':'mse',
 			'early_stop_patience':25,
-			'batch_size':1024}
+			'batch_size':128}
 
 
 # TARGET = 'rsd'
-VERSION = 'twins_alt_v7_accrue'
+VERSION = 'twins_alt_v4_oversampling'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -266,10 +266,10 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# splitting the sequences for input to the CNN
 	x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'],
-																				dates=date_dict['train'], model_type='regression', oversample=False)
+																				dates=date_dict['train'], model_type='regression', oversample=True)
 
 	x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'],
-																		dates=date_dict['val'], model_type='regression', oversample=False)
+																		dates=date_dict['val'], model_type='regression', oversample=True)
 
 	x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'],
 																			dates=date_dict['test'], model_type='regression', oversample=False)
@@ -362,7 +362,7 @@ class ACCRUE(nn.Module):
 	def __init__(self):
 		super(ACCRUE, self).__init__()
 	
-	def forward(self, y_pred, y_true, N):
+	def forward(self, y_pred, y_true):
 		# splitting the y_pred tensor into mean and std
 		mean, std = torch.unbind(y_pred, dim=-1)
 
@@ -370,18 +370,85 @@ class ACCRUE(nn.Module):
 		mean = mean.unsqueeze(-1)
 		std = std.unsqueeze(-1)
 		y_true = y_true.unsqueeze(-1)
+		N = y_true.shape[0]
 
 		# calculating the error
 		crps = torch.mean(self.calculate_crps(self.epsilon_error(y_true, mean), std))
-		rs = self.calculate_rs(self.eta(y_true, mean, std), N)
+		rs = torch.sub(torch.mean(self.calculate_rs(self.eta(y_true, mean, std), N)), torch.div(1, torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
 		beta = self.calculate_beta(self.epsilon_error(y_true, mean), N)
 		# beta = 0.5
-
 
 		accrue = torch.add(torch.mul(crps, beta), torch.mul(rs, torch.sub(1, beta)))
 
 		return accrue
 
+	# def est_beta(y_pred, y_true):
+
+	# 	y_true = y_true.cpu().detach().numpy()
+	# 	y_pred = y_pred.cpu().detach().numpy()
+
+	# 	d = y_true - y_pred
+	# 	d = (d - d.mean())/d.std()
+	# 	N = len(d)
+	# 	i = np.arange(1, N+1)
+	# 	# RS_min_1 = 1/(np.sqrt(np.pi)*N)
+	# 	RS_min_2 = -1*erfinv((2*i-1)/N-1)**2
+	# 	# RS_min_3 = np.sqrt(2/np.pi)/2
+
+	# 	RS_min = np.nansum(np.exp(RS_min_2)/np.sqrt(np.pi)/N)
+	# 	# CRPS from matlab code
+	# 	sigma = np.abs(d)/np.sqrt(np.log(2))+1e-6
+	# 	dum = d/sigma/np.sqrt(2)
+	# 	CRPS_min = np.nanmean(sigma*(np.sqrt(2)*dum*erf(dum)
+	# 							+ np.sqrt(2/np.pi)*np.exp(-1*dum**2) 
+	# 							- 1/np.sqrt(np.pi)))
+
+	# 	return RS_min/(RS_min+CRPS_min), CRPS_min, RS_min
+
+
+	# def get_loss(self, y_pred, y_true, X, training=False):
+
+	# 	# import ipdb;ipdb.set_trace()
+	# 	d = y_true[:, 1] - y_true[:, 0]
+	# 	# d = (d - self.mean)/self.std
+	# 	# y_pred = (y_pred - self.mean)/self.std
+
+	# 	# d = d.cuda()
+	# 	N = d.shape[0]
+	# 	sigma = torch.exp(y_pred).squeeze()
+
+	# 	x = torch.zeros(sigma.shape[0])
+	# 	CRPS = torch.zeros(sigma.shape[0])
+	# 	RS = torch.zeros(sigma.shape[0])
+
+	# 	x = d/sigma
+	# 	x = x/np.sqrt(2)
+
+	# 	# import ipdb;ipdb.set_trace()
+
+	# 	ind = torch.argsort(x)
+	# 	ind_orig = torch.argsort(ind)+1
+	# 	ind_orig = ind_orig
+		# x = x.to(self.device)
+		# CRPS_1 = np.sqrt(2)*x*erf(x)
+		# CRPS_2 = np.sqrt(2/np.pi)*torch.exp(-x**2) 
+		# CRPS_3 = 1/torch.sqrt(torch.tensor(np.pi))
+		# # CRPS_1 = CRPS_1.to(self.device)
+		# # CRPS_2 = CRPS_2.to(self.device)
+		# CRPS_3 = CRPS_3
+
+		# CRPS = sigma*(CRPS_1 + CRPS_2 - CRPS_3)
+
+		# # import ipdb;ipdb.set_trace()
+		# RS = N*(x/N*(erf(x)+1) - 
+		# 	x*(2*ind_orig-1)/N**2 + 
+		# 	torch.exp(-x**2)/np.sqrt(np.pi)/N)
+
+		# RS = RS
+		# loss = CRPS/self.CRPS_min+RS/self.RS_min
+		# loss = torch.mean(loss)
+
+		# return loss
 
 	def epsilon_error(self, y, u):
 
@@ -399,7 +466,7 @@ class ACCRUE(nn.Module):
 
 	def calculate_crps(self, epsilon, sig):
 
-		crps = torch.mul(sig, (torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
+		crps = torch.mul(sig,(torch.add(torch.mul(torch.div(epsilon, sig), torch.erf(torch.div(epsilon, torch.mul(np.sqrt(2), sig)))), \
 								torch.sub(torch.mul(torch.sqrt(torch.div(2, np.pi)), torch.exp(torch.div(torch.mul(-1, torch.pow(epsilon, 2)), \
 								(torch.mul(2, torch.pow(sig, 2)))))), torch.div(1, torch.sqrt(torch.tensor(np.pi)))))))
 		
@@ -409,12 +476,16 @@ class ACCRUE(nn.Module):
 	def calculate_rs(self, eta, N):
 		''' Function to calculate the reliability score of the model'''
 
+		ind = torch.argsort(eta, dim=0)
+		ind_orig = torch.argsort(ind)+1
+
 		# getting a tensor that contains numbers 1 to N
 		i = torch.sub(torch.mul(2,torch.arange(1, N+1)),1)
 
 		i = i.to(DEVICE)
 		N = torch.tensor(N).to(DEVICE)
 		eta = eta.to(DEVICE)
+		ind_orig = ind_orig.to(DEVICE)
 
 		# RS with triling terms
 		# rs = torch.sub(torch.mean(torch.add(torch.mul(eta, torch.add(torch.erf(eta),1)), \
@@ -423,17 +494,17 @@ class ACCRUE(nn.Module):
 		# 				torch.div(1, torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
 
 		# RS without trailing term
-		rs = torch.mean(torch.add(torch.mul(eta, torch.add(torch.erf(eta),1)), \
-						torch.add(torch.mul(torch.mul(-1, torch.div(eta, N)), i),
-						torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.sqrt(torch.tensor(np.pi))))))
+		rs = torch.mul(N,(torch.add(torch.mul(torch.div(eta,N), torch.add(torch.erf(eta),1)), \
+						torch.add(torch.mul(torch.mul(-1, torch.div(torch.sub(torch.mul(2,ind_orig),1), torch.pow(N,2))), eta),
+						torch.div(torch.exp(torch.mul(-1,torch.pow(eta,2))), torch.mul(N,torch.sqrt(torch.tensor(np.pi))))))))
 		
 		return rs
 
 	def crps_min(self, epsilon, N):
 		''' Function to calculate the theoretical minimum CRPS of the model'''
-		crps_min = torch.mul(torch.div(torch.sqrt(torch.log(torch.tensor(4))), torch.mul(2,N)), torch.sum(epsilon))
+		crps_min = torch.mul(torch.div(torch.sqrt(torch.log(torch.tensor(4))), torch.mul(2,N)),epsilon)
 
-		return crps_min
+		return torch.sum(crps_min)
 	
 
 	def rs_min(self, N):
@@ -446,10 +517,10 @@ class ACCRUE(nn.Module):
 		# 					torch.div(1,torch.sqrt(torch.mul(2, torch.tensor(np.pi)))))
 
 		# RS without trailing terms
-		rs_min = (torch.mul(torch.div(1,torch.sqrt(torch.tensor(np.pi))), \
-							torch.mean(torch.exp(torch.mul(-1, torch.pow(torch.erfinv(i),2))))))
+		rs_min = (torch.mul(torch.div(1,torch.mul(N,torch.sqrt(torch.tensor(np.pi)))), \
+							torch.exp(torch.mul(-1, torch.pow(torch.erfinv(i),2)))))
 		
-		return rs_min
+		return torch.sum(rs_min)
 
 	
 	def calculate_beta(self, epsilon, N):
@@ -754,8 +825,9 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		model.to(DEVICE)
 
 		# defining the loss function and the optimizer
-		# criterion = CRSP()
-		criterion = ACCRUE()
+		criterion = CRSP()
+		# criterion = ACCRUE()
+		# criterion = nn.BCELoss()
 		optimizer = optim.Adam(model.parameters(), lr=1e-7)
 
 		# initalizing the early stopping class
@@ -787,7 +859,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				output = output.squeeze()
 
 				# calculating the loss
-				loss = criterion(output, y, N_train)
+				loss = criterion(output, y)
 
 				# backward pass
 				optimizer.zero_grad()
@@ -822,7 +894,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 					# output = output.view(len(output),2)
 					output = output.squeeze()
 
-					val_loss = criterion(output, y, N_val)
+					val_loss = criterion(output, y)
 
 					# emptying the cuda cache
 					swmag = swmag.to('cpu')

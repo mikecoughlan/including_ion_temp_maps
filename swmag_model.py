@@ -98,8 +98,10 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 
 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
 
+	twins_maps = utils.loading_filtered_twins_maps()
 
-	return merged_df, thresholds
+
+	return merged_df, thresholds, twins_maps
 
 
 def getting_prepared_data(target_var, cluster, region, get_features=False, do_scaling=True):
@@ -116,7 +118,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	'''
 
-	merged_df, thresholds = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
+	merged_df, thresholds, twins_maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
 
 	# target = merged_df['classification']
 	target = merged_df[f'rolling_{target_var}']
@@ -137,7 +139,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# if not, calculating the twins maps and extracting the storms
 	else:
-		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False)
+		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False, map_keys=twins_maps.keys())
 		storms_extracted_dict = {'storms':storms, 'target':target}
 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
