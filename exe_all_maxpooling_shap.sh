@@ -25,7 +25,7 @@ python3 calculating_shap.py --target 'rsd' --cluster 'canadian_cluster' --region
 
 python3 calculating_shap.py --target 'rsd' --cluster 'central_european_cluster' --region 'CEU-0' --version 'twins_alt_v4' --model_type 'twins'
 python3 calculating_shap.py --target 'rsd' --cluster 'central_european_cluster' --region 'CEU-1' --version 'twins_alt_v4' --model_type 'twins'
-python3 calculating_shap.py --target 'rsd' --cluster 'central_european_cluster' --region 'CEU-2' --version 'twins_alt_v4' --model_type 'twins'
+python3 calculating_shap.py --target 'rsd' --cluster 'central_european_cluster' --region 'CEU-2' --version 'twins_alt_v4_oversampling' --model_type 'twins'
 python3 calculating_shap.py --target 'rsd' --cluster 'central_european_cluster' --region 'CEU-3' --version 'twins_alt_v4' --model_type 'twins'
 
 python3 calculating_shap.py --target 'rsd' --cluster 'non_cluster_regions' --region 'SVLB' --version 'twins_alt_v4_oversampling' --model_type 'twins'

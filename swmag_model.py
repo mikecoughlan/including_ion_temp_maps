@@ -73,8 +73,8 @@ CONFIG = {'time_history':30,
 			'batch_size':128}
 
 
-TARGET = 'rsd'
-VERSION = 'swmag_v6-oversampling'
+# TARGET = 'rsd'
+VERSION = 'swmag_alt_v4'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -139,7 +139,8 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	# if not, calculating the twins maps and extracting the storms
 	else:
-		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False, map_keys=twins_maps.keys())
+		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, 
+												target_var='classification', concat=False, map_keys=twins_maps.keys())
 		storms_extracted_dict = {'storms':storms, 'target':target}
 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
 			pickle.dump(storms_extracted_dict, f)
@@ -263,8 +264,8 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	print(f'shape of x_test: {len(x_test)}')
 
 	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression', oversample=True)
-	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression', oversample=True)
+	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression', oversample=False)
+	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression', oversample=False)
 	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression', oversample=False)
 
 	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
