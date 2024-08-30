@@ -153,6 +153,8 @@ def loading_filtered_twins_maps(full_map=False, filter='coverage'):
 	filters = filters.reshape((filters.shape[0],))
 	dates = dates.reshape((dates.shape[0],))
 
+	print(f'Maps shape: {maps.shape}')
+
 	# using the coverage filter to filter out the maps and dates
 	if filter == 'coverage':
 		flag = filters>=3
@@ -168,6 +170,8 @@ def loading_filtered_twins_maps(full_map=False, filter='coverage'):
 		maps = maps[flag,:,:]
 
 	dates = dates[flag]
+
+	print(f'Maps shape after filtering: {maps.shape}')
 
 	dates = pd.to_datetime(dates-719529, unit='D').round('min')
 	map_dict = {date.strftime(format='%Y-%m-%d %H:%M:%S'): ion_temps for date, ion_temps in zip(dates, maps)}
