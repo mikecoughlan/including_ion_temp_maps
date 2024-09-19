@@ -1,6 +1,6 @@
 ####################################################################################
 #
-# exmining_twins_and_supermag/non_twins_modeling_v0.py
+# exmining_twins_and_supermag/swmag_modeling_v0.py
 #
 # Performing the modeling using the Solar Wind and Ground Magnetomoeter data.
 # TWINS data passes through a pre-trained autoencoder that reduces the TWINS maps
@@ -74,7 +74,7 @@ CONFIG = {'time_history':30,
 
 
 # TARGET = 'rsd'
-VERSION = 'swmag_alt_v4'
+# VERSION = 'swmag_alt_v4_dbht'
 
 
 def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
@@ -85,7 +85,7 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
 									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
 									mean=True, std=True, maximum=True, median=True,
-									forecast=1, window=30, classification=True)
+									forecast=1, window=30, classification=True, target_param=target_var)
 
 	supermag_df = RP()
 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
@@ -121,7 +121,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	merged_df, thresholds, twins_maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
 
 	# target = merged_df['classification']
-	target = merged_df[f'rolling_{target_var}']
+	# target = merged_df[f'rolling_{target_var}']
 
 	# reducing the dataframe to only the features that will be used in the model plus the target variable
 	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
@@ -152,7 +152,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	features = storms[0].columns
 
 	# splitting the data on a day to day basis to reduce data leakage
-	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2017-12-01'), freq='D')
+	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2018-12-31'), freq='D')
 	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
 
 	day_df = day_df.drop(specific_test_days)
@@ -167,6 +167,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 
 	train_dates_df, val_dates_df, test_dates_df = pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]})
 	x_train, x_val, x_test, y_train, y_val, y_test, twins_train, twins_val, twins_test = [], [], [], [], [], [], [], [], []
+	print(f'shape of test_days before: {len(test_days)}')
 
 	# using the days to split the data
 	for day in train_days:
@@ -256,20 +257,22 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 		x_test = [scaler.transform(x) for x in x_test]
 
 	# saving the scaler
-	with open(f'models/{target_var}/non_twins_region_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
+	with open(f'models/{target_var}/swmag_region_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
 		pickle.dump(scaler, f)
 
-	print(f'shape of x_train: {len(x_train)}')
-	print(f'shape of x_val: {len(x_val)}')
-	print(f'shape of x_test: {len(x_test)}')
+	# print(f'shape of x_train: {len(x_train)}')
+	# print(f'shape of x_val: {len(x_val)}')
+	print(f'shape of x_test before: {len(x_test)}')
+
 
 	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression', oversample=False)
-	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression', oversample=False)
+	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression', oversample=OVERSAMPLING)
+	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression', oversample=OVERSAMPLING)
 	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression', oversample=False)
 
-	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
-	print('Shape of xtrain after oversampling: '+str(x_train.shape))
+	print(f'shape of x_test: {x_test.shape}')
+	print(f'test dates to drop: {len(test_dates_to_drop)}')
+	# print(f'shape of x_train: {x_train.shape}')
 
 	# dropping the dates that correspond to arrays that would have had nan values
 	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
@@ -788,18 +791,18 @@ def main():
 		os.makedirs(f'outputs/{TARGET}')
 	if not os.path.exists(f'models/{TARGET}'):
 		os.makedirs(f'models/{TARGET}')
+	print(VERSION)
 
 	# loading all data and indicies
 	print('Loading data...')
 	xtrain, xval, xtest, ytrain, yval, ytest, dates_dict = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION)
 
-	print('xtrain shape: '+str(xtrain.shape))
-	print('xval shape: '+str(xval.shape))
+	# print('xtrain shape: '+str(xtrain.shape))
+	# print('xval shape: '+str(xval.shape))
 	print('xtest shape: '+str(xtest.shape))
-	print('ytrain shape: '+str(ytrain.shape))
-	print('yval shape: '+str(yval.shape))
+	# print('ytrain shape: '+str(ytrain.shape))
+	# print('yval shape: '+str(yval.shape))
 	print('ytest shape: '+str(ytest.shape))
-
 	with open(f'outputs/dates_dict_region_{REGION}_version_{VERSION}.pkl', 'wb') as f:
 		pickle.dump(dates_dict, f)
 
@@ -830,8 +833,9 @@ def main():
 	# making predictions
 	print('Making predictions...')
 	results_df = evaluation(model, test, dates_dict['test'])
-	print(results_df.head())
-	results_df.to_feather(f'outputs/{TARGET}/non_twins_modeling_region_{REGION}_version_{VERSION}.feather')
+	print(f'results df shape: {results_df.shape}')
+	print(f'results df: {results_df.tail()}')
+	results_df.to_feather(f'outputs/{TARGET}/swmag_modeling_region_{REGION}_version_{VERSION}.feather')
 
 	# clearing the session to prevent memory leaks
 	gc.collect()
@@ -843,16 +847,34 @@ if __name__ == '__main__':
 	args.add_argument('--target', type=str, help='The target variable to be modeled')
 	args.add_argument('--region', type=str, help='The region to be modeled')
 	args.add_argument('--cluster', type=str, help='The cluster containing the region to be modeled')
+	args.add_argument('--version', type=str, help='The version of the model to be run')
+	args.add_argument('--oversampling', type=str, help='Whether to oversample the data or not', default='False')
 
 	args = args.parse_args()
+
+	def str2bool(v):
+		if isinstance(v, bool):
+			return v
+		if v.lower() in ('yes', 'true', 't', 'y', '1'):
+			return True
+		elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+			return False
+		else:
+			raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 	# global TARGET
 	# global REGION
 	# global CLUSTER
+	if str2bool(args.oversampling):
+		VERSION = args.version+'_oversampling'
+	else:
+		VERSION = args.version
 
 	TARGET = args.target
 	REGION = args.region
 	CLUSTER = args.cluster
+	OVERSAMPLING = str2bool(args.oversampling)
 
 	main()
 

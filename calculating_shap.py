@@ -63,7 +63,7 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
 									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
 									mean=True, std=True, maximum=True, median=True,
-									forecast=1, window=30, classification=True)
+									forecast=1, window=30, classification=True, target_param=target_var)
 
 	supermag_df = RP()
 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
@@ -76,7 +76,7 @@ def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]
 
 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
 
-	maps = utils.loading_filtered_twins_maps()
+	maps = utils.loading_filtered_twins_maps(full_map=False)
 
 	# changing all negative values in maps to 0
 	for key in maps.keys():
@@ -134,7 +134,7 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 	features = storms[0].columns
 
 	# splitting the data on a day to day basis to reduce data leakage
-	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2017-12-01'), freq='D')
+	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2018-12-31'), freq='D')
 	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
 
 	day_df = day_df.drop(specific_test_days)
@@ -260,7 +260,7 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 		x_val, y_val, val_dates_to_drop, ___ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression')
 		x_test, y_test, test_dates_to_drop, ___ = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression')
 
-	print(f'length of val dates to drop: {len(val_dates_to_drop)}')
+	
 
 	# dropping the dates that correspond to arrays that would have had nan values
 	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
@@ -270,6 +270,7 @@ def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=Tr
 	date_dict['train'].reset_index(drop=True, inplace=True)
 	date_dict['val'].reset_index(drop=True, inplace=True)
 	date_dict['test'].reset_index(drop=True, inplace=True)
+
 
 	print(f'Total training dates: {len(date_dict["train"])}')
 
@@ -442,7 +443,7 @@ def handling_gaps(df, threshold, dates):
 	df.index = pd.to_datetime(df.index)
 
 	start_time = pd.to_datetime('2009-07-19')
-	end_time = pd.to_datetime('2017-12-31')
+	end_time = pd.to_datetime('2018-12-31')
 	date_range = pd.date_range(start_time, end_time, freq='min')
 
 	full_time_df = pd.DataFrame(index=date_range)
@@ -566,8 +567,8 @@ def main():
 		train_twins, val_twins, test_twins = None, None, None
 		training_data, testing_data = xtrain, xtest
 
-	if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
-		raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
+	# if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
+		# raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
 
 	if MODEL_TYPE == 'swmag':
 		print(f'size of xtrain: {xtrain.shape}')
@@ -582,7 +583,7 @@ def main():
 		print(f'size of test_swmag: {test_swmag.shape}')
 		print(f'size of test_twins: {test_twins.shape}')
 		print(f'size of ytest: {ytest.shape}')
-
+	
 	print('Loading model....')
 	MODEL = loading_model(auto_or_max='max')
 
@@ -602,6 +603,7 @@ def main():
 						'features':features,
 						'expected_values': expected_values}
 
+	print('Dates in evaluation dict: '+str(evaluation_dict['Date_UTC'].shape))
 
 	with open(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl', 'wb') as f:
 		pickle.dump(evaluation_dict, f)

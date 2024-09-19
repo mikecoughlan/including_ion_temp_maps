@@ -297,7 +297,7 @@ class RegionPreprocessing():
 		self.classification = self.__dict__.get('classification', False)
 		self.target_param = self.__dict__.get('target_param', 'rsd')
 
-		print(f'Forecast: {self.forecast}, Window: {self.window}, Classification: {self.classification}')
+		print(f'Forecast: {self.forecast}, Window: {self.window}, Classification: {self.classification} Target parameter: {self.target_param}')
 
 
 
@@ -534,7 +534,7 @@ class RegionPreprocessing():
 		regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 
 		if self.classification:
-
+			print(f'Target parameter: {self.target_param}')
 			regional_df = self.classification_column(df=regional_df, param=self.target_param, percentile=0.99)
 
 		if map_keys is not None:
