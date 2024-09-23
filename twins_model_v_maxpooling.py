@@ -163,7 +163,7 @@ def getting_prepared_data(target_var, cluster, region, get_features=False, do_sc
 	features = storms[0].columns
 
 	# splitting the data on a day to day basis to reduce data leakage
-	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2018-12-31'), freq='D')
+	day_df = pd.date_range(start=pd.to_datetime('2009-07-18'), end=pd.to_datetime('2017-12-31'), freq='D')
 	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
 
 	day_df = day_df.drop(specific_test_days)
