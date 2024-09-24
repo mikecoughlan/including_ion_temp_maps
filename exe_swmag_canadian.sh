@@ -11,3 +11,5 @@ python3 swmag_model.py --target 'dbht_max' --cluster 'canadian_cluster' --region
 python3 swmag_model.py --target 'rsd' --cluster 'canadian_cluster' --region 'CAN-0' --version 'swmag_alt_v5' 
 python3 swmag_model.py --target 'rsd' --cluster 'canadian_cluster' --region 'CAN-1' --version 'swmag_alt_v5' 
 python3 swmag_model.py --target 'rsd' --cluster 'canadian_cluster' --region 'CAN-2' --version 'swmag_alt_v5' 
+
+bash exe_twins_maxpooling_canadian.sh

@@ -14,3 +14,4 @@ python3 swmag_model.py --target 'rsd' --cluster 'central_european_cluster' --reg
 python3 swmag_model.py --target 'rsd' --cluster 'central_european_cluster' --region 'CEU-2' --version 'swmag_alt_v5' --oversampling 'True'
 python3 swmag_model.py --target 'rsd' --cluster 'central_european_cluster' --region 'CEU-3' --version 'swmag_alt_v5' 
 
+bash exe_twins_maxpooling_central_europe.sh

@@ -13,3 +13,5 @@ python3 swmag_model.py --target 'rsd' --cluster 'greenland_cluster' --region 'GR
 python3 swmag_model.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-1' --version 'swmag_alt_v5' --oversampling 'True'
 python3 swmag_model.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-2' --version 'swmag_alt_v5' --oversampling 'True'
 python3 swmag_model.py --target 'rsd' --cluster 'greenland_cluster' --region 'GRL-3' --version 'swmag_alt_v5' 
+
+bash exe_twins_maxpooling_greenland.sh

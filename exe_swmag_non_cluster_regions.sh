@@ -18,3 +18,4 @@ python3 swmag_model.py --target 'rsd' --cluster 'non_cluster_regions' --region '
 python3 swmag_model.py --target 'rsd' --cluster 'non_cluster_regions' --region 'HUD-0' --version 'swmag_alt_v5' 
 python3 swmag_model.py --target 'rsd' --cluster 'non_cluster_regions' --region 'HUD-1' --version 'swmag_alt_v5' --oversampling 'True'
 
+bash exe_twins_maxpooling_non_cluster_regions.sh

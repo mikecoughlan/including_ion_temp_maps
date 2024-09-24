@@ -77,230 +77,231 @@ CONFIG = {'time_history':30,
 # VERSION = 'swmag_alt_v4_dbht'
 
 
-def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
+# def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
 
-	# loading all the datasets and dictonaries
+# 	# loading all the datasets and dictonaries
 
-	# loading all the datasets and dictonaries
-	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
-									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
-									mean=True, std=True, maximum=True, median=True,
-									forecast=1, window=30, classification=True, target_param=target_var)
+# 	# loading all the datasets and dictonaries
+# 	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
+# 									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
+# 									mean=True, std=True, maximum=True, median=True,
+# 									forecast=1, window=30, classification=True, target_param=target_var)
 
-	supermag_df = RP()
-	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
+# 	supermag_df = RP()
+# 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
 
-	# converting the solarwind data to log10
-	solarwind['logT'] = np.log10(solarwind['T'])
-	solarwind.drop(columns=['T'], inplace=True)
+# 	# converting the solarwind data to log10
+# 	solarwind['logT'] = np.log10(solarwind['T'])
+# 	solarwind.drop(columns=['T'], inplace=True)
 
-	thresholds = [supermag_df[target_var].quantile(percentile) for percentile in percentiles]
+# 	thresholds = [supermag_df[target_var].quantile(percentile) for percentile in percentiles]
 
-	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
+# 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
 
-	twins_maps = utils.loading_filtered_twins_maps()
-
-
-	return merged_df, thresholds, twins_maps
+# 	twins_maps = utils.loading_filtered_twins_maps()
 
 
-def getting_prepared_data(target_var, cluster, region, get_features=False, do_scaling=True):
-	'''
-	Calling the data prep class without the TWINS data for this version of the model.
-
-	Returns:
-		X_train (np.array): training inputs for the model
-		X_val (np.array): validation inputs for the model
-		X_test (np.array): testing inputs for the model
-		y_train (np.array): training targets for the model
-		y_val (np.array): validation targets for the model
-		y_test (np.array): testing targets for the model
-
-	'''
-
-	merged_df, thresholds, twins_maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
-
-	# target = merged_df['classification']
-	# target = merged_df[f'rolling_{target_var}']
-
-	# reducing the dataframe to only the features that will be used in the model plus the target variable
-	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
-					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
-	merged_df = merged_df[vars_to_keep]
-
-	print('Columns in Merged Dataframe: '+str(merged_df.columns))
-
-	# loading the data corresponding to the twins maps if it has already been calculated
-	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
-			storms_extracted_dict = pickle.load(f)
-		storms = storms_extracted_dict['storms']
-		target = storms_extracted_dict['target']
-
-	# if not, calculating the twins maps and extracting the storms
-	else:
-		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, 
-												target_var='classification', concat=False, map_keys=twins_maps.keys())
-		storms_extracted_dict = {'storms':storms, 'target':target}
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
-			pickle.dump(storms_extracted_dict, f)
-
-	# making sure the target variable has been dropped from the input data
-	print('Columns in Dataframe: '+str(storms[0].columns))
-
-	# getting the feature names
-	features = storms[0].columns
-
-	# splitting the data on a day to day basis to reduce data leakage
-	day_df = pd.date_range(start=pd.to_datetime('2009-07-18'), end=pd.to_datetime('2017-12-31'), freq='D')
-	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
-
-	day_df = day_df.drop(specific_test_days)
-
-	train_days, test_days = train_test_split(day_df, test_size=0.1, shuffle=True, random_state=CONFIG['random_seed'])
-	train_days, val_days = train_test_split(train_days, test_size=0.125, shuffle=True, random_state=CONFIG['random_seed'])
-
-	# adding the two dateimte values of interest to the test days df
-	test_days = test_days.tolist()
-	test_days = pd.to_datetime(test_days)
-	test_days.append(specific_test_days)
-
-	train_dates_df, val_dates_df, test_dates_df = pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]})
-	x_train, x_val, x_test, y_train, y_val, y_test, twins_train, twins_val, twins_test = [], [], [], [], [], [], [], [], []
-	print(f'shape of test_days before: {len(test_days)}')
-
-	# using the days to split the data
-	for day in train_days:
-		train_dates_df = pd.concat([train_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-	for day in val_days:
-		val_dates_df = pd.concat([val_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-	for day in test_days:
-		test_dates_df = pd.concat([test_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-
-	train_dates_df.set_index('dates', inplace=True)
-	val_dates_df.set_index('dates', inplace=True)
-	test_dates_df.set_index('dates', inplace=True)
-
-	train_dates_df.index = pd.to_datetime(train_dates_df.index)
-	val_dates_df.index = pd.to_datetime(val_dates_df.index)
-	test_dates_df.index = pd.to_datetime(test_dates_df.index)
-
-	date_dict = {'train':pd.DataFrame(), 'val':pd.DataFrame(), 'test':pd.DataFrame()}
-
-	# getting the data corresponding to the dates
-	for storm, y in zip(storms, target):
-
-		copied_storm = storm.copy()
-		copied_storm = copied_storm.reset_index(inplace=False, drop=False).rename(columns={'index':'Date_UTC'})
-
-		if storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in train_dates_df.index:
-			x_train.append(storm)
-			y_train.append(y)
-			date_dict['train'] = pd.concat([date_dict['train'], copied_storm['Date_UTC'][-10:]], axis=0)
-		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in val_dates_df.index:
-			x_val.append(storm)
-			y_val.append(y)
-			date_dict['val'] = pd.concat([date_dict['val'], copied_storm['Date_UTC'][-10:]], axis=0)
-		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in test_dates_df.index:
-			x_test.append(storm)
-			y_test.append(y)
-			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
-
-	new_train, new_val, new_test = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-	new_train = pd.concat(x_train, axis=0)
-	new_val = pd.concat(x_val, axis=0)
-	new_test = pd.concat(x_test, axis=0)
-
-	# new_train = new_train[pd.to_datetime('2012-03-01 00:00:00'):pd.to_datetime('2012-04-01 00:00:00')]
-	# new_val = new_val[pd.to_datetime('2012-03-01 00:00:00'):pd.to_datetime('2012-04-01 00:00:00')]
-	# new_test = new_test[pd.to_datetime('2012-03-01 00:00:00'):pd.to_datetime('2012-04-01 00:00:00')]
-
-	train_description = new_train.describe()
-	val_description = new_val.describe()
-	test_description = new_test.describe()
-
-	train_description.to_feather(f'outputs/{REGION}_{VERSION}_train_description.feather')
-	val_description.to_feather(f'outputs/{REGION}_{VERSION}_val_description.feather')
-	test_description.to_feather(f'outputs/{REGION}_{VERSION}_test_description.feather')
-
-	print('Descriptions saved!')
-
-	print(f'new train: {new_train.isnull().sum()}')
-
-	new_y_train = np.concatenate(y_train, axis=0)
-	new_y_val = np.concatenate(y_val, axis=0)
-	new_y_test = np.concatenate(y_test, axis=0)
-
-	print(f'train ratio: {new_y_train.sum()/len(new_y_train)}')
-	print(f'val ratio: {new_y_val.sum()/len(new_y_val)}')
-	print(f'test ratio: {new_y_test.sum()/len(new_y_test)}')
+# 	return merged_df, thresholds, twins_maps
 
 
-	print(f'new train: {new_train.isnull().sum()}')
-	print(f'new val: {new_val.isnull().sum()}')
-	print(f'new test: {new_test.isnull().sum()}')
+# def getting_prepared_data(target_var, cluster, region, get_features=False, do_scaling=True):
+# 	'''
+# 	Calling the data prep class without the TWINS data for this version of the model.
 
-	date_dict['train'].reset_index(drop=True, inplace=True)
-	date_dict['val'].reset_index(drop=True, inplace=True)
-	date_dict['test'].reset_index(drop=True, inplace=True)
+# 	Returns:
+# 		X_train (np.array): training inputs for the model
+# 		X_val (np.array): validation inputs for the model
+# 		X_test (np.array): testing inputs for the model
+# 		y_train (np.array): training targets for the model
+# 		y_val (np.array): validation targets for the model
+# 		y_test (np.array): testing targets for the model
 
-	date_dict['train'].rename(columns={date_dict['train'].columns[0]:'Date_UTC'}, inplace=True)
-	date_dict['val'].rename(columns={date_dict['val'].columns[0]:'Date_UTC'}, inplace=True)
-	date_dict['test'].rename(columns={date_dict['test'].columns[0]:'Date_UTC'}, inplace=True)
+# 	'''
 
-	to_scale_with = pd.concat(x_train, axis=0)
-	scaler = StandardScaler()
-	scaler.fit(to_scale_with)
-	if do_scaling:
-		x_train = [scaler.transform(x) for x in x_train]
-		x_val = [scaler.transform(x) for x in x_val]
-		x_test = [scaler.transform(x) for x in x_test]
+# 	merged_df, thresholds, twins_maps = loading_data(target_var=target_var, cluster=cluster, region=region)
 
-	# saving the scaler
-	with open(f'models/{target_var}/swmag_region_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
-		pickle.dump(scaler, f)
+# 	# target = merged_df['classification']
+# 	# target = merged_df[f'rolling_{target_var}']
 
-	# print(f'shape of x_train: {len(x_train)}')
-	# print(f'shape of x_val: {len(x_val)}')
-	print(f'shape of x_test before: {len(x_test)}')
+# 	# reducing the dataframe to only the features that will be used in the model plus the target variable
+# 	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+# 					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
+# 	merged_df = merged_df[vars_to_keep]
+
+# 	print('Columns in Merged Dataframe: '+str(merged_df.columns))
+
+# 	# loading the data corresponding to the twins maps if it has already been calculated
+# 	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
+# 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
+# 			storms_extracted_dict = pickle.load(f)
+# 		storms = storms_extracted_dict['storms']
+# 		target = storms_extracted_dict['target']
+
+# 	# if not, calculating the twins maps and extracting the storms
+# 	else:
+# 		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, 
+# 												target_var='classification', concat=False, map_keys=twins_maps.keys())
+# 		storms_extracted_dict = {'storms':storms, 'target':target}
+# 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
+# 			pickle.dump(storms_extracted_dict, f)
+
+# 	print('Storms Extracted!')
+# 	print(f'Number of storms: {len(storms)}')
+# 	print(f'Number of target values: {len(target)}')
+# 	print(f'Number of Maps: {len(twins_maps)}')
+
+# 	# making sure the target variable has been dropped from the input data
+# 	print('Columns in Dataframe: '+str(storms[0].columns))
+
+# 	# getting the feature names
+# 	features = storms[0].columns
+
+# 	# splitting the data on a day to day basis to reduce data leakage
+# 	day_df = pd.date_range(start=pd.to_datetime('2009-07-18'), end=pd.to_datetime('2017-12-31'), freq='D')
+# 	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
+
+# 	day_df = day_df.drop(specific_test_days)
+
+# 	train_days, test_days = train_test_split(day_df, test_size=0.1, shuffle=True, random_state=CONFIG['random_seed'])
+# 	train_days, val_days = train_test_split(train_days, test_size=0.125, shuffle=True, random_state=CONFIG['random_seed'])
+
+# 	# adding the two dateimte values of interest to the test days df
+# 	test_days = test_days.tolist()
+# 	test_days = pd.to_datetime(test_days)
+# 	test_days.append(specific_test_days)
+
+# 	train_dates_df, val_dates_df, test_dates_df = pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]})
+# 	x_train, x_val, x_test, y_train, y_val, y_test, twins_train, twins_val, twins_test = [], [], [], [], [], [], [], [], []
+# 	print(f'shape of test_days before: {len(test_days)}')
+
+# 	# using the days to split the data
+# 	for day in train_days:
+# 		train_dates_df = pd.concat([train_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
+# 	for day in val_days:
+# 		val_dates_df = pd.concat([val_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
+# 	for day in test_days:
+# 		test_dates_df = pd.concat([test_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
+
+# 	train_dates_df.set_index('dates', inplace=True)
+# 	val_dates_df.set_index('dates', inplace=True)
+# 	test_dates_df.set_index('dates', inplace=True)
+
+# 	train_dates_df.index = pd.to_datetime(train_dates_df.index)
+# 	val_dates_df.index = pd.to_datetime(val_dates_df.index)
+# 	test_dates_df.index = pd.to_datetime(test_dates_df.index)
+
+# 	date_dict = {'train':pd.DataFrame(), 'val':pd.DataFrame(), 'test':pd.DataFrame()}
+
+# 	# getting the data corresponding to the dates
+# 	for storm, y in zip(storms, target):
+
+# 		copied_storm = storm.copy()
+# 		copied_storm = copied_storm.reset_index(inplace=False, drop=False).rename(columns={'index':'Date_UTC'})
+
+# 		if storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in train_dates_df.index:
+# 			x_train.append(storm)
+# 			y_train.append(y)
+# 			date_dict['train'] = pd.concat([date_dict['train'], copied_storm['Date_UTC'][-10:]], axis=0)
+# 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in val_dates_df.index:
+# 			x_val.append(storm)
+# 			y_val.append(y)
+# 			date_dict['val'] = pd.concat([date_dict['val'], copied_storm['Date_UTC'][-10:]], axis=0)
+# 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in test_dates_df.index:
+# 			x_test.append(storm)
+# 			y_test.append(y)
+# 			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
+
+# 	new_train, new_val, new_test = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+# 	new_train = pd.concat(x_train, axis=0)
+# 	new_val = pd.concat(x_val, axis=0)
+# 	new_test = pd.concat(x_test, axis=0)
+
+# 	train_description = new_train.describe()
+# 	val_description = new_val.describe()
+# 	test_description = new_test.describe()
+
+# 	train_description.to_feather(f'outputs/{REGION}_{VERSION}_train_description.feather')
+# 	val_description.to_feather(f'outputs/{REGION}_{VERSION}_val_description.feather')
+# 	test_description.to_feather(f'outputs/{REGION}_{VERSION}_test_description.feather')
+
+# 	print('Descriptions saved!')
+
+# 	print(f'new train: {new_train.isnull().sum()}')
+
+# 	new_y_train = np.concatenate(y_train, axis=0)
+# 	new_y_val = np.concatenate(y_val, axis=0)
+# 	new_y_test = np.concatenate(y_test, axis=0)
+
+# 	print(f'train ratio: {new_y_train.sum()/len(new_y_train)}')
+# 	print(f'val ratio: {new_y_val.sum()/len(new_y_val)}')
+# 	print(f'test ratio: {new_y_test.sum()/len(new_y_test)}')
 
 
-	# splitting the sequences for input to the CNN
-	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression', oversample=OVERSAMPLING)
-	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression', oversample=OVERSAMPLING)
-	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression', oversample=False)
+# 	print(f'new train: {new_train.isnull().sum()}')
+# 	print(f'new val: {new_val.isnull().sum()}')
+# 	print(f'new test: {new_test.isnull().sum()}')
 
-	print(f'shape of x_test: {x_test.shape}')
-	print(f'test dates to drop: {len(test_dates_to_drop)}')
-	# print(f'shape of x_train: {x_train.shape}')
+# 	date_dict['train'].reset_index(drop=True, inplace=True)
+# 	date_dict['val'].reset_index(drop=True, inplace=True)
+# 	date_dict['test'].reset_index(drop=True, inplace=True)
 
-	# dropping the dates that correspond to arrays that would have had nan values
-	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
-	date_dict['val'].drop(val_dates_to_drop, axis=0, inplace=True)
-	date_dict['test'].drop(test_dates_to_drop, axis=0, inplace=True)
+# 	date_dict['train'].rename(columns={date_dict['train'].columns[0]:'Date_UTC'}, inplace=True)
+# 	date_dict['val'].rename(columns={date_dict['val'].columns[0]:'Date_UTC'}, inplace=True)
+# 	date_dict['test'].rename(columns={date_dict['test'].columns[0]:'Date_UTC'}, inplace=True)
 
-	date_dict['train'].reset_index(drop=True, inplace=True)
-	date_dict['val'].reset_index(drop=True, inplace=True)
-	date_dict['test'].reset_index(drop=True, inplace=True)
+# 	to_scale_with = pd.concat(x_train, axis=0)
+# 	scaler = StandardScaler()
+# 	scaler.fit(to_scale_with)
+# 	if do_scaling:
+# 		x_train = [scaler.transform(x) for x in x_train]
+# 		x_val = [scaler.transform(x) for x in x_val]
+# 		x_test = [scaler.transform(x) for x in x_test]
 
-	print(f'Total training dates: {len(date_dict["train"])}')
+# 	# saving the scaler
+# 	with open(f'models/{target_var}/swmag_region_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
+# 		pickle.dump(scaler, f)
 
-	print(f'shape of x_train: {x_train.shape}')
-	print(f'shape of x_val: {x_val.shape}')
-	print(f'shape of x_test: {x_test.shape}')
+# 	# print(f'shape of x_train: {len(x_train)}')
+# 	# print(f'shape of x_val: {len(x_val)}')
+# 	print(f'shape of x_test before: {len(x_test)}')
 
-	print(f'Nans in training data: {np.isnan(x_train).sum()}')
-	print(f'Nans in validation data: {np.isnan(x_val).sum()}')
-	print(f'Nans in testing data: {np.isnan(x_test).sum()}')
 
-	print(f'Nans in training target: {np.isnan(y_train).sum()}')
-	print(f'Nans in validation target: {np.isnan(y_val).sum()}')
-	print(f'Nans in testing target: {np.isnan(y_test).sum()}')
+# 	# splitting the sequences for input to the CNN
+# 	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression', oversample=OVERSAMPLING)
+# 	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression', oversample=OVERSAMPLING)
+# 	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression', oversample=False)
 
-	if not get_features:
-		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict
-	else:
-		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict, features
+# 	print(f'shape of x_test: {x_test.shape}')
+# 	print(f'test dates to drop: {len(test_dates_to_drop)}')
+# 	# print(f'shape of x_train: {x_train.shape}')
+
+# 	# dropping the dates that correspond to arrays that would have had nan values
+# 	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
+# 	date_dict['val'].drop(val_dates_to_drop, axis=0, inplace=True)
+# 	date_dict['test'].drop(test_dates_to_drop, axis=0, inplace=True)
+
+# 	date_dict['train'].reset_index(drop=True, inplace=True)
+# 	date_dict['val'].reset_index(drop=True, inplace=True)
+# 	date_dict['test'].reset_index(drop=True, inplace=True)
+
+# 	print(f'Total training dates: {len(date_dict["train"])}')
+
+# 	print(f'shape of x_train: {x_train.shape}')
+# 	print(f'shape of x_val: {x_val.shape}')
+# 	print(f'shape of x_test: {x_test.shape}')
+
+# 	print(f'Nans in training data: {np.isnan(x_train).sum()}')
+# 	print(f'Nans in validation data: {np.isnan(x_val).sum()}')
+# 	print(f'Nans in testing data: {np.isnan(x_test).sum()}')
+
+# 	print(f'Nans in training target: {np.isnan(y_train).sum()}')
+# 	print(f'Nans in validation target: {np.isnan(y_val).sum()}')
+# 	print(f'Nans in testing target: {np.isnan(y_test).sum()}')
+
+# 	if not get_features:
+# 		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict
+# 	else:
+# 		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict, features
 
 
 class CRSP(nn.Module):
@@ -587,9 +588,6 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				X = X.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
 
-				# adding a channel dimension to the data
-				X = X.unsqueeze(1)
-
 				# forward pass
 				output = model(X)
 
@@ -621,9 +619,6 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 				# moving the data to the available device
 				X = X.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
-
-				# adding a channel dimension to the data
-				X = X.unsqueeze(1)
 
 				# forward pass with no gradient calculation
 				with torch.no_grad():
@@ -737,8 +732,6 @@ def evaluation(model, test, test_dates):
 			x = x.to(DEVICE, dtype=torch.float)
 			y = y.to(DEVICE, dtype=torch.float)
 
-			x = x.unsqueeze(1)
-
 			predicted = model(x)
 
 			predicted = predicted.squeeze()
@@ -795,11 +788,13 @@ def main():
 
 	# loading all data and indicies
 	print('Loading data...')
-	xtrain, xval, xtest, ytrain, yval, ytest, dates_dict = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION)
-
+	train_swmag, ___, ytrain, val_swmag, ___, yval, test_swmag, ___, ytest, dates_dict = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=OVERSAMPLING)
+	print(f'shape of train swmag: {train_swmag.shape}; shape of train y: {ytrain.shape}')
+	print(f'shape of val swmag: {val_swmag.shape}; shape of val y: {yval.shape}')
+	print(f'shape of test swmag: {test_swmag.shape}; shape of test y: {ytest.shape}')
 	# print('xtrain shape: '+str(xtrain.shape))
 	# print('xval shape: '+str(xval.shape))
-	print('xtest shape: '+str(xtest.shape))
+	print('xtest shape: '+str(test_swmag.shape))
 	# print('ytrain shape: '+str(ytrain.shape))
 	# print('yval shape: '+str(yval.shape))
 	print('ytest shape: '+str(ytest.shape))
@@ -807,12 +802,12 @@ def main():
 		pickle.dump(dates_dict, f)
 
 
-	train_size = list(xtrain.shape)
+	train_size = list(train_swmag.shape)
 
 	# creating the dataloaders
-	train = DataLoader(list(zip(xtrain, ytrain)), batch_size=CONFIG['batch_size'], shuffle=True)
-	val = DataLoader(list(zip(xval, yval)), batch_size=CONFIG['batch_size'], shuffle=True)
-	test = DataLoader(list(zip(xtest, ytest)), batch_size=CONFIG['batch_size'], shuffle=False)
+	train = DataLoader(list(zip(train_swmag, ytrain)), batch_size=CONFIG['batch_size'], shuffle=True)
+	val = DataLoader(list(zip(val_swmag, yval)), batch_size=CONFIG['batch_size'], shuffle=True)
+	test = DataLoader(list(zip(test_swmag, ytest)), batch_size=CONFIG['batch_size'], shuffle=False)
 
 	# creating the model
 	print('Creating model....')
@@ -824,7 +819,7 @@ def main():
 
 	# printing model summary
 	model.to(DEVICE)
-	print(summary(model, (1, train_size[1], train_size[2])))
+	print(summary(model, (1, train_size[2], train_size[3])))
 
 	# fitting the model
 	print('Fitting model...')

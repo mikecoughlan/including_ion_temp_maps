@@ -20,3 +20,4 @@ python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --re
 python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-5' --version 'swmag_alt_v5' 
 python3 swmag_model.py --target 'rsd' --cluster 'fennoscandinavian_cluster' --region 'FSC-6' --version 'swmag_alt_v5' 
 
+bash exe_twins_maxpooling_fennoscandinavia.sh
