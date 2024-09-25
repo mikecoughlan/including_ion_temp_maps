@@ -811,7 +811,7 @@ def main():
 
 	# loading all data and indicies
 	print('Loading data...')
-	train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, dates_dict = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG)
+	train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, dates_dict = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=OVERSAMPLING)
 	print(f'shape of train swmag: {train_swmag.shape}; shape of train twins: {train_twins.shape}; shape of train y: {ytrain.shape}')
 	print(f'shape of val swmag: {val_swmag.shape}; shape of val twins: {val_twins.shape}; shape of val y: {yval.shape}')
 	print(f'shape of test swmag: {test_swmag.shape}; shape of test twins: {test_twins.shape}; shape of test y: {ytest.shape}')
