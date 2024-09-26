@@ -55,237 +55,6 @@ CONFIG = {'time_history':30,
 			'batch_size':128}
 
 
-def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
-
-	# loading all the datasets and dictonaries
-
-	# loading all the datasets and dictonaries
-	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
-									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
-									mean=True, std=True, maximum=True, median=True,
-									forecast=1, window=30, classification=True, target_param=target_var)
-
-	supermag_df = RP()
-	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
-
-	# converting the solarwind data to log10
-	solarwind['logT'] = np.log10(solarwind['T'])
-	solarwind.drop(columns=['T'], inplace=True)
-
-	thresholds = [supermag_df[target_var].quantile(percentile) for percentile in percentiles]
-
-	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
-
-	maps = utils.loading_filtered_twins_maps(full_map=False)
-
-	# changing all negative values in maps to 0
-	for key in maps.keys():
-		maps[key][maps[key] < 0] = 0
-
-	return merged_df, thresholds, maps
-
-
-def twins_scaling(x, scaling_mean, scaling_std):
-	# scaling the data to have a mean of 0 and a standard deviation of 1
-	return (x - scaling_mean) / scaling_std
-
-
-def getting_prepared_data(target_var, cluster, region, model_type, do_scaling=True):
-	'''
-	Calling the data prep class without the TWINS data for this version of the model.
-
-	Returns:
-		X_train (np.array): training inputs for the model
-		X_val (np.array): validation inputs for the model
-		X_test (np.array): testing inputs for the model
-		y_train (np.array): training targets for the model
-		y_val (np.array): validation targets for the model
-		y_test (np.array): testing targets for the model
-
-	'''
-
-	merged_df, thresholds, maps = loading_data(target_var=target_var, cluster=cluster, region=region, percentiles=[0.5, 0.75, 0.9, 0.99])
-
-	# reducing the dataframe to only the features that will be used in the model plus the target variable
-	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
-					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
-	merged_df = merged_df[vars_to_keep]
-
-	print('Columns in Merged Dataframe: '+str(merged_df.columns))
-
-	# loading the data corresponding to the twins maps if it has already been calculated
-	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
-			storms_extracted_dict = pickle.load(f)
-		storms = storms_extracted_dict['storms']
-		target = storms_extracted_dict['target']
-
-	# if not, calculating the twins maps and extracting the storms
-	else:
-		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, target_var='classification', concat=False)
-		storms_extracted_dict = {'storms':storms, 'target':target}
-		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
-			pickle.dump(storms_extracted_dict, f)
-
-	# making sure the target variable has been dropped from the input data
-	print('Columns in Dataframe: '+str(storms[0].columns))
-
-	# getting the feature names
-	features = storms[0].columns
-
-	# splitting the data on a day to day basis to reduce data leakage
-	day_df = pd.date_range(start=pd.to_datetime('2009-07-01'), end=pd.to_datetime('2018-12-31'), freq='D')
-	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
-
-	day_df = day_df.drop(specific_test_days)
-
-	train_days, test_days = train_test_split(day_df, test_size=0.1, shuffle=True, random_state=CONFIG['random_seed'])
-	train_days, val_days = train_test_split(train_days, test_size=0.125, shuffle=True, random_state=CONFIG['random_seed'])
-
-	# adding the two dateimte values of interest to the test days df
-	test_days = test_days.tolist()
-	test_days = pd.to_datetime(test_days)
-	test_days.append(specific_test_days)
-
-	train_dates_df, val_dates_df, test_dates_df = pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]})
-	x_train, x_val, x_test, y_train, y_val, y_test, twins_train, twins_val, twins_test = [], [], [], [], [], [], [], [], []
-
-	# using the days to split the data
-	for day in train_days:
-		train_dates_df = pd.concat([train_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-		if train_dates_df['dates'].isna().sum() > 0:
-			print('Nans in training dates')
-			print(train_dates_df)
-			raise ValueError('Nans in training dates')
-	for day in val_days:
-		val_dates_df = pd.concat([val_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-	for day in test_days:
-		test_dates_df = pd.concat([test_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-
-	train_dates_df.set_index('dates', inplace=True)
-	val_dates_df.set_index('dates', inplace=True)
-	test_dates_df.set_index('dates', inplace=True)
-
-	train_dates_df.index = pd.to_datetime(train_dates_df.index)
-	val_dates_df.index = pd.to_datetime(val_dates_df.index)
-	test_dates_df.index = pd.to_datetime(test_dates_df.index)
-
-	date_dict = {'train':pd.DataFrame(), 'val':pd.DataFrame(), 'test':pd.DataFrame()}
-
-	# getting the data corresponding to the dates
-	for storm, y, twins in zip(storms, target, maps):
-
-		copied_storm = storm.copy()
-		copied_storm = copied_storm.reset_index(inplace=False, drop=False).rename(columns={'index':'Date_UTC'})
-
-		if storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in train_dates_df.index:
-			x_train.append(storm)
-			y_train.append(y)
-			if model_type=='twins':
-				twins_train.append(maps[twins])
-			date_dict['train'] = pd.concat([date_dict['train'], copied_storm['Date_UTC'][-10:]], axis=0)
-		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in val_dates_df.index:
-			x_val.append(storm)
-			y_val.append(y)
-			if model_type=='twins':
-				twins_val.append(maps[twins])
-			date_dict['val'] = pd.concat([date_dict['val'], copied_storm['Date_UTC'][-10:]], axis=0)
-		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in test_dates_df.index:
-			x_test.append(storm)
-			y_test.append(y)
-			if model_type=='twins':
-				twins_test.append(maps[twins])
-			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
-
-	date_dict['train'].reset_index(drop=True, inplace=True)
-	date_dict['val'].reset_index(drop=True, inplace=True)
-	date_dict['test'].reset_index(drop=True, inplace=True)
-
-	date_dict['train'].rename(columns={date_dict['train'].columns[0]:'Date_UTC'}, inplace=True)
-	date_dict['val'].rename(columns={date_dict['val'].columns[0]:'Date_UTC'}, inplace=True)
-	date_dict['test'].rename(columns={date_dict['test'].columns[0]:'Date_UTC'}, inplace=True)
-
-	print(f'length of train dates: {len(twins_train)}')
-
-	scaler_dict = {}
-
-	if model_type == 'twins':
-		# getting the mean and standard deviation of the twins training data
-		twins_scaling_array = np.vstack(twins_train).flatten()
-
-		print(f'shape of twins scaling array: {twins_scaling_array.shape}')
-		print(f'twins scaling array: {twins_scaling_array}')
-
-		twins_mean = np.mean(twins_scaling_array)
-		twins_std = np.std(twins_scaling_array)
-
-		# scaling the twins data
-		twins_train = [twins_scaling(x, twins_mean, twins_std) for x in twins_train]
-		twins_val = [twins_scaling(x, twins_mean, twins_std) for x in twins_val]
-		twins_test = [twins_scaling(x, twins_mean, twins_std) for x in twins_test]
-
-		scaler_dict['twins_mean'] = twins_mean
-		scaler_dict['twins_std'] = twins_std
-
-	swmag_scaling_array = pd.concat(x_train, axis=0)
-	scaler = StandardScaler()
-	scaler.fit(swmag_scaling_array)
-	if do_scaling:
-		x_train = [scaler.transform(x) for x in x_train]
-		x_val = [scaler.transform(x) for x in x_val]
-		x_test = [scaler.transform(x) for x in x_test]
-
-	print(f'shape of x_train: {len(x_train)}')
-	print(f'shape of x_val: {len(x_val)}')
-	print(f'shape of x_test: {len(x_test)}')
-
-	scaler_dict['swmag_scaler'] = scaler
-
-	with open(f'outputs/scalers/{model_type}_{region}_{VERSION}.pkl', 'wb') as f:
-		pickle.dump(scaler_dict, f)
-
-	if model_type == 'twins':
-		# splitting the sequences for input to the CNN
-		x_train, y_train, train_dates_to_drop, twins_train = utils.split_sequences(x_train, y_train, maps=twins_train, n_steps=CONFIG['time_history'], 
-																					dates=date_dict['train'], model_type='regression')
-
-		x_val, y_val, val_dates_to_drop, twins_val = utils.split_sequences(x_val, y_val, maps=twins_val, n_steps=CONFIG['time_history'], 
-																			dates=date_dict['val'], model_type='regression')
-
-		x_test, y_test, test_dates_to_drop, twins_test  = utils.split_sequences(x_test, y_test, maps=twins_test, n_steps=CONFIG['time_history'], 
-																				dates=date_dict['test'], model_type='regression')
-
-	else:
-		x_train, y_train, train_dates_to_drop, ___ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression')
-		x_val, y_val, val_dates_to_drop, ___ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression')
-		x_test, y_test, test_dates_to_drop, ___ = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression')
-
-	
-
-	# dropping the dates that correspond to arrays that would have had nan values
-	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
-	date_dict['val'].drop(val_dates_to_drop, axis=0, inplace=True)
-	date_dict['test'].drop(test_dates_to_drop, axis=0, inplace=True)
-
-	date_dict['train'].reset_index(drop=True, inplace=True)
-	date_dict['val'].reset_index(drop=True, inplace=True)
-	date_dict['test'].reset_index(drop=True, inplace=True)
-
-
-	print(f'Total training dates: {len(date_dict["train"])}')
-
-	if model_type == 'twins':
-		return torch.tensor(x_train).unsqueeze(1), torch.tensor(twins_train).unsqueeze(1), torch.tensor(y_train), \
-				torch.tensor(x_val).unsqueeze(1), torch.tensor(twins_val).unsqueeze(1), torch.tensor(y_val), \
-				torch.tensor(x_test).unsqueeze(1), torch.tensor(twins_test).unsqueeze(1), torch.tensor(y_test), \
-				date_dict, features
-	else:
-		return torch.tensor(x_train).unsqueeze(1), torch.tensor(y_train), \
-				torch.tensor(x_val).unsqueeze(1), torch.tensor(y_val), \
-				torch.tensor(x_test).unsqueeze(1), torch.tensor(y_test), \
-				date_dict, features
-
-
 def loading_model(auto_or_max='auto'):
 
 	if MODEL_TYPE == 'twins':
@@ -557,32 +326,25 @@ def main():
 
 	print(f'Preparing data....')
 	# preparing the data for the model
-	if MODEL_TYPE == 'twins':
-		train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, \
-			dates_dict, features = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, model_type=MODEL_TYPE)
+	train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, \
+		dates_dict, features = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=False)
+
+	if MODEL_TYPE == 'twins':		
 		training_data, testing_data = [train_swmag, train_twins], [test_swmag, test_twins]
 	elif MODEL_TYPE == 'swmag':
-		xtrain, ytrain, xval, yval, xtest, ytest, \
-			dates_dict, features = getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, model_type=MODEL_TYPE)
 		train_twins, val_twins, test_twins = None, None, None
-		training_data, testing_data = xtrain, xtest
+		training_data, testing_data = train_swmag, test_swmag
+		
 
 	# if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
 		# raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
 
-	if MODEL_TYPE == 'swmag':
-		print(f'size of xtrain: {xtrain.shape}')
-		print(f'size of ytrain: {ytrain.shape}')
-		print(f'size of xtest: {xtest.shape}')
-		print(f'size of ytest: {ytest.shape}')
-	
-	else:
-		print(f'size of train_swmag: {train_swmag.shape}')
-		print(f'size of train_twins: {train_twins.shape}')
-		print(f'size of ytrain: {ytrain.shape}')
-		print(f'size of test_swmag: {test_swmag.shape}')
-		print(f'size of test_twins: {test_twins.shape}')
-		print(f'size of ytest: {ytest.shape}')
+	print(f'size of train_swmag: {train_swmag.shape}')
+	print(f'size of train_twins: {train_twins.shape}')
+	print(f'size of ytrain: {ytrain.shape}')
+	print(f'size of test_swmag: {test_swmag.shape}')
+	print(f'size of test_twins: {test_twins.shape}')
+	print(f'size of ytest: {ytest.shape}')
 	
 	print('Loading model....')
 	MODEL = loading_model(auto_or_max='max')
@@ -683,6 +445,7 @@ if __name__ == '__main__':
 	CLUSTER = args.cluster
 	VERSION = args.version
 	MODEL_TYPE = args.model_type
+	
 
 	main()
 
