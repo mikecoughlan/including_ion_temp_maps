@@ -327,7 +327,7 @@ def main():
 	print(f'Preparing data....')
 	# preparing the data for the model
 	train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, \
-		dates_dict, features = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=False)
+		dates_dict, features = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=False, get_features=True)
 
 	if MODEL_TYPE == 'twins':		
 		training_data, testing_data = [train_swmag, train_twins], [test_swmag, test_twins]
@@ -339,13 +339,6 @@ def main():
 	# if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
 		# raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
 
-	print(f'size of train_swmag: {train_swmag.shape}')
-	print(f'size of train_twins: {train_twins.shape}')
-	print(f'size of ytrain: {ytrain.shape}')
-	print(f'size of test_swmag: {test_swmag.shape}')
-	print(f'size of test_twins: {test_twins.shape}')
-	print(f'size of ytest: {ytest.shape}')
-	
 	print('Loading model....')
 	MODEL = loading_model(auto_or_max='max')
 
