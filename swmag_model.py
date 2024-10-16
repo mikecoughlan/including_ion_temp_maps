@@ -22,6 +22,7 @@ import os
 import pickle
 import subprocess
 import time
+import wandb
 
 import matplotlib
 import matplotlib.animation as animation
@@ -46,6 +47,8 @@ from torchsummary import summary
 from torchvision.models.feature_extraction import (create_feature_extractor,
                                                    get_graph_node_names)
 
+from data_prep import PreparingData
+
 import utils
 
 pd.options.mode.chained_assignment = None
@@ -61,247 +64,6 @@ working_dir = data_directory+'mike_working_dir/twins_data_modeling/'
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {DEVICE}')
-
-
-CONFIG = {'time_history':30,
-			'random_seed':42,
-			'filters':128,
-			'learning_rate':1e-7,
-			'epochs':500,
-			'loss':'mse',
-			'early_stop_patience':25,
-			'batch_size':128}
-
-
-# TARGET = 'rsd'
-# VERSION = 'swmag_alt_v4_dbht'
-
-
-# def loading_data(target_var, cluster, region, percentiles=[0.5, 0.75, 0.9, 0.99]):
-
-# 	# loading all the datasets and dictonaries
-
-# 	# loading all the datasets and dictonaries
-# 	RP = utils.RegionPreprocessing(cluster=cluster, region=region,
-# 									features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'],
-# 									mean=True, std=True, maximum=True, median=True,
-# 									forecast=1, window=30, classification=True, target_param=target_var)
-
-# 	supermag_df = RP()
-# 	solarwind = utils.loading_solarwind(omni=True, limit_to_twins=True)
-
-# 	# converting the solarwind data to log10
-# 	solarwind['logT'] = np.log10(solarwind['T'])
-# 	solarwind.drop(columns=['T'], inplace=True)
-
-# 	thresholds = [supermag_df[target_var].quantile(percentile) for percentile in percentiles]
-
-# 	merged_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
-
-# 	twins_maps = utils.loading_filtered_twins_maps()
-
-
-# 	return merged_df, thresholds, twins_maps
-
-
-# def getting_prepared_data(target_var, cluster, region, get_features=False, do_scaling=True):
-# 	'''
-# 	Calling the data prep class without the TWINS data for this version of the model.
-
-# 	Returns:
-# 		X_train (np.array): training inputs for the model
-# 		X_val (np.array): validation inputs for the model
-# 		X_test (np.array): testing inputs for the model
-# 		y_train (np.array): training targets for the model
-# 		y_val (np.array): validation targets for the model
-# 		y_test (np.array): testing targets for the model
-
-# 	'''
-
-# 	merged_df, thresholds, twins_maps = loading_data(target_var=target_var, cluster=cluster, region=region)
-
-# 	# target = merged_df['classification']
-# 	# target = merged_df[f'rolling_{target_var}']
-
-# 	# reducing the dataframe to only the features that will be used in the model plus the target variable
-# 	vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
-# 					'B_Total', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'proton_density', 'logT']
-# 	merged_df = merged_df[vars_to_keep]
-
-# 	print('Columns in Merged Dataframe: '+str(merged_df.columns))
-
-# 	# loading the data corresponding to the twins maps if it has already been calculated
-# 	if os.path.exists(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl'):
-# 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'rb') as f:
-# 			storms_extracted_dict = pickle.load(f)
-# 		storms = storms_extracted_dict['storms']
-# 		target = storms_extracted_dict['target']
-
-# 	# if not, calculating the twins maps and extracting the storms
-# 	else:
-# 		storms, target = utils.storm_extract(df=merged_df, lead=30, recovery=9, twins=True, target=True, 
-# 												target_var='classification', concat=False, map_keys=twins_maps.keys())
-# 		storms_extracted_dict = {'storms':storms, 'target':target}
-# 		with open(working_dir+f'twins_method_storm_extraction_region_{region}_version_{VERSION}.pkl', 'wb') as f:
-# 			pickle.dump(storms_extracted_dict, f)
-
-# 	print('Storms Extracted!')
-# 	print(f'Number of storms: {len(storms)}')
-# 	print(f'Number of target values: {len(target)}')
-# 	print(f'Number of Maps: {len(twins_maps)}')
-
-# 	# making sure the target variable has been dropped from the input data
-# 	print('Columns in Dataframe: '+str(storms[0].columns))
-
-# 	# getting the feature names
-# 	features = storms[0].columns
-
-# 	# splitting the data on a day to day basis to reduce data leakage
-# 	day_df = pd.date_range(start=pd.to_datetime('2009-07-18'), end=pd.to_datetime('2017-12-31'), freq='D')
-# 	specific_test_days = pd.date_range(start=pd.to_datetime('2012-03-07'), end=pd.to_datetime('2012-03-13'), freq='D')
-
-# 	day_df = day_df.drop(specific_test_days)
-
-# 	train_days, test_days = train_test_split(day_df, test_size=0.1, shuffle=True, random_state=CONFIG['random_seed'])
-# 	train_days, val_days = train_test_split(train_days, test_size=0.125, shuffle=True, random_state=CONFIG['random_seed'])
-
-# 	# adding the two dateimte values of interest to the test days df
-# 	test_days = test_days.tolist()
-# 	test_days = pd.to_datetime(test_days)
-# 	test_days.append(specific_test_days)
-
-# 	train_dates_df, val_dates_df, test_dates_df = pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]}), pd.DataFrame({'dates':[]})
-# 	x_train, x_val, x_test, y_train, y_val, y_test, twins_train, twins_val, twins_test = [], [], [], [], [], [], [], [], []
-# 	print(f'shape of test_days before: {len(test_days)}')
-
-# 	# using the days to split the data
-# 	for day in train_days:
-# 		train_dates_df = pd.concat([train_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-# 	for day in val_days:
-# 		val_dates_df = pd.concat([val_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-# 	for day in test_days:
-# 		test_dates_df = pd.concat([test_dates_df, pd.DataFrame({'dates':pd.date_range(start=day, end=day+pd.DateOffset(days=1), freq='min')})], axis=0)
-
-# 	train_dates_df.set_index('dates', inplace=True)
-# 	val_dates_df.set_index('dates', inplace=True)
-# 	test_dates_df.set_index('dates', inplace=True)
-
-# 	train_dates_df.index = pd.to_datetime(train_dates_df.index)
-# 	val_dates_df.index = pd.to_datetime(val_dates_df.index)
-# 	test_dates_df.index = pd.to_datetime(test_dates_df.index)
-
-# 	date_dict = {'train':pd.DataFrame(), 'val':pd.DataFrame(), 'test':pd.DataFrame()}
-
-# 	# getting the data corresponding to the dates
-# 	for storm, y in zip(storms, target):
-
-# 		copied_storm = storm.copy()
-# 		copied_storm = copied_storm.reset_index(inplace=False, drop=False).rename(columns={'index':'Date_UTC'})
-
-# 		if storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in train_dates_df.index:
-# 			x_train.append(storm)
-# 			y_train.append(y)
-# 			date_dict['train'] = pd.concat([date_dict['train'], copied_storm['Date_UTC'][-10:]], axis=0)
-# 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in val_dates_df.index:
-# 			x_val.append(storm)
-# 			y_val.append(y)
-# 			date_dict['val'] = pd.concat([date_dict['val'], copied_storm['Date_UTC'][-10:]], axis=0)
-# 		elif storm.index[0].strftime('%Y-%m-%d %H:%M:%S') in test_dates_df.index:
-# 			x_test.append(storm)
-# 			y_test.append(y)
-# 			date_dict['test'] = pd.concat([date_dict['test'], copied_storm['Date_UTC'][-10:]], axis=0)
-
-# 	new_train, new_val, new_test = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-# 	new_train = pd.concat(x_train, axis=0)
-# 	new_val = pd.concat(x_val, axis=0)
-# 	new_test = pd.concat(x_test, axis=0)
-
-# 	train_description = new_train.describe()
-# 	val_description = new_val.describe()
-# 	test_description = new_test.describe()
-
-# 	train_description.to_feather(f'outputs/{REGION}_{VERSION}_train_description.feather')
-# 	val_description.to_feather(f'outputs/{REGION}_{VERSION}_val_description.feather')
-# 	test_description.to_feather(f'outputs/{REGION}_{VERSION}_test_description.feather')
-
-# 	print('Descriptions saved!')
-
-# 	print(f'new train: {new_train.isnull().sum()}')
-
-# 	new_y_train = np.concatenate(y_train, axis=0)
-# 	new_y_val = np.concatenate(y_val, axis=0)
-# 	new_y_test = np.concatenate(y_test, axis=0)
-
-# 	print(f'train ratio: {new_y_train.sum()/len(new_y_train)}')
-# 	print(f'val ratio: {new_y_val.sum()/len(new_y_val)}')
-# 	print(f'test ratio: {new_y_test.sum()/len(new_y_test)}')
-
-
-# 	print(f'new train: {new_train.isnull().sum()}')
-# 	print(f'new val: {new_val.isnull().sum()}')
-# 	print(f'new test: {new_test.isnull().sum()}')
-
-# 	date_dict['train'].reset_index(drop=True, inplace=True)
-# 	date_dict['val'].reset_index(drop=True, inplace=True)
-# 	date_dict['test'].reset_index(drop=True, inplace=True)
-
-# 	date_dict['train'].rename(columns={date_dict['train'].columns[0]:'Date_UTC'}, inplace=True)
-# 	date_dict['val'].rename(columns={date_dict['val'].columns[0]:'Date_UTC'}, inplace=True)
-# 	date_dict['test'].rename(columns={date_dict['test'].columns[0]:'Date_UTC'}, inplace=True)
-
-# 	to_scale_with = pd.concat(x_train, axis=0)
-# 	scaler = StandardScaler()
-# 	scaler.fit(to_scale_with)
-# 	if do_scaling:
-# 		x_train = [scaler.transform(x) for x in x_train]
-# 		x_val = [scaler.transform(x) for x in x_val]
-# 		x_test = [scaler.transform(x) for x in x_test]
-
-# 	# saving the scaler
-# 	with open(f'models/{target_var}/swmag_region_{region}_version_{VERSION}_scaler.pkl', 'wb') as f:
-# 		pickle.dump(scaler, f)
-
-# 	# print(f'shape of x_train: {len(x_train)}')
-# 	# print(f'shape of x_val: {len(x_val)}')
-# 	print(f'shape of x_test before: {len(x_test)}')
-
-
-# 	# splitting the sequences for input to the CNN
-# 	x_train, y_train, train_dates_to_drop, __ = utils.split_sequences(x_train, y_train, n_steps=CONFIG['time_history'], dates=date_dict['train'], model_type='regression', oversample=OVERSAMPLING)
-# 	x_val, y_val, val_dates_to_drop, __ = utils.split_sequences(x_val, y_val, n_steps=CONFIG['time_history'], dates=date_dict['val'], model_type='regression', oversample=OVERSAMPLING)
-# 	x_test, y_test, test_dates_to_drop, __  = utils.split_sequences(x_test, y_test, n_steps=CONFIG['time_history'], dates=date_dict['test'], model_type='regression', oversample=False)
-
-# 	print(f'shape of x_test: {x_test.shape}')
-# 	print(f'test dates to drop: {len(test_dates_to_drop)}')
-# 	# print(f'shape of x_train: {x_train.shape}')
-
-# 	# dropping the dates that correspond to arrays that would have had nan values
-# 	date_dict['train'].drop(train_dates_to_drop, axis=0, inplace=True)
-# 	date_dict['val'].drop(val_dates_to_drop, axis=0, inplace=True)
-# 	date_dict['test'].drop(test_dates_to_drop, axis=0, inplace=True)
-
-# 	date_dict['train'].reset_index(drop=True, inplace=True)
-# 	date_dict['val'].reset_index(drop=True, inplace=True)
-# 	date_dict['test'].reset_index(drop=True, inplace=True)
-
-# 	print(f'Total training dates: {len(date_dict["train"])}')
-
-# 	print(f'shape of x_train: {x_train.shape}')
-# 	print(f'shape of x_val: {x_val.shape}')
-# 	print(f'shape of x_test: {x_test.shape}')
-
-# 	print(f'Nans in training data: {np.isnan(x_train).sum()}')
-# 	print(f'Nans in validation data: {np.isnan(x_val).sum()}')
-# 	print(f'Nans in testing data: {np.isnan(x_test).sum()}')
-
-# 	print(f'Nans in training target: {np.isnan(y_train).sum()}')
-# 	print(f'Nans in validation target: {np.isnan(y_val).sum()}')
-# 	print(f'Nans in testing target: {np.isnan(y_test).sum()}')
-
-# 	if not get_features:
-# 		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict
-# 	else:
-# 		return x_train, x_val, x_test, y_train, y_val, y_test, date_dict, features
 
 
 class CRSP(nn.Module):
@@ -359,44 +121,28 @@ class SWMAG(nn.Module):
 			nn.ReLU(),
 		)
 		self.linear_block = nn.Sequential(
-			nn.Linear(256*15*7, 256),
+			nn.Linear(256*30*8, 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(128, 2),
-			nn.Sigmoid()
+			nn.Softmax()
+			# nn.Linear(128, 1),
+			# nn.Sigmoid()
 		)
 
 	def forward(self, x):
 
 		x = self.conv_block(x)
-		x = torch.reshape(x, (-1, 256*15*7))
+		x = torch.reshape(x, (-1, 256*30*8))
 		x = self.linear_block(x)
 
 		# clipping to avoid values too small for backprop
 		x = torch.clamp(x, min=1e-9)
 
 		return x
-
-	# def predict(self, x, return_numpy=False):
-
-	# 	if not isinstance(x, torch.Tensor):
-	# 		x = torch.tensor(x).to(DEVICE, dtype=torch.float)
-
-	# 	self.eval()
-	# 	with torch.no_grad():
-
-	# 		output = self.forward(x)
-
-	# 	if return_numpy:
-	# 		output = output.cpu().numpy()
-
-	# 	else:
-	# 		output = output.cpu()
-
-	# 	return output
 
 
 class Early_Stopping():
@@ -522,7 +268,7 @@ def resume_training(model, optimizer):
 	return model, optimizer, epoch, finished_training
 
 
-def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_epochs=500):
+def fit_model(model, train, val, class_weights=None, val_loss_patience=25, overfit_patience=5, num_epochs=500, learning_rate=1e-3):
 
 	'''
 	_summary_: Function to train the swmag model.
@@ -542,7 +288,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 	Returns:
 		object: the trained model
 	'''
-	optimizer = optim.Adam(model.parameters(), lr=1e-7)
+	optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 	# checking if the model has already been trained, loading it if it exists
 	if os.path.exists(f'models/{TARGET}/region_{REGION}_{VERSION}.pt'):
 		model, optimizer, current_epoch, finished_training = resume_training(model=model, optimizer=optimizer)
@@ -563,7 +309,9 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 		model.to(DEVICE)
 
 		# defining the loss function and the optimizer
-		criterion = CRSP()
+		criterion = nn.BCELoss()
+		
+		# criterion = nn.BCELoss()
 		optimizer = optim.Adam(model.parameters(), lr=1e-7)
 
 		# initalizing the early stopping class
@@ -583,16 +331,23 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 			# using the training set to train the model
 			for X, y in train:
-
 				# moving the data to the available device
 				X = X.to(DEVICE, dtype=torch.float)
 				y = y.to(DEVICE, dtype=torch.float)
-
+		
 				# forward pass
 				output = model(X)
 
 				output = output.squeeze()
-
+				if class_weights is not None:
+					if y.dim() == 1:
+					# calculating the loss
+						criterion.weight = y * class_weights[1] + (1-y)*class_weights[0]
+					else:
+						# repeating the class weights for the batch size
+						ones_tensor = torch.ones_like(y)
+						criterion.weight = class_weights*ones_tensor
+				
 				# calculating the loss
 				loss = criterion(output, y)
 
@@ -611,6 +366,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 
 			# setting the model to eval mode so the dropout layers are not used during validation and weights are not updated
 			model.eval()
+			# criterion = nn.BCELoss()
 
 			# using validation set to check for overfitting
 			# looping through the batches
@@ -639,7 +395,7 @@ def fit_model(model, train, val, val_loss_patience=25, overfit_patience=5, num_e
 			# getting the average loss for the epoch
 			loss = running_training_loss/len(train)
 			val_loss = running_val_loss/len(val)
-
+			wandb.log({'train_loss':loss, 'val_loss':val_loss})
 			# adding the loss to the list
 			train_loss_list.append(loss)
 			val_loss_list.append(val_loss)
@@ -716,7 +472,7 @@ def evaluation(model, test, test_dates):
 	'''
 	print(f'length of test dates: {len(test_dates)}')
 	# creting an array to store the predictions
-	predicted_mean, predicted_std, xtest_list, ytest_list = [], [], [], []
+	predicted_class_1, predicted_std, xtest_list, ytest_list = [], [], [], []
 	# setting the encoder and decoder into evaluation model
 	model.eval()
 
@@ -733,11 +489,13 @@ def evaluation(model, test, test_dates):
 			y = y.to(DEVICE, dtype=torch.float)
 
 			predicted = model(x)
-
 			predicted = predicted.squeeze()
-
+			
 			# getting shape of tensor
-			loss = F.mse_loss(predicted[:,0], y)
+			if len(predicted.shape) == 1:
+				loss = F.mse_loss(predicted, y)
+			else:
+				loss = F.mse_loss(predicted[:,1], y[:,1])
 			running_loss += loss.item()
 
 			# making sure the predicted value is on the cpu
@@ -749,25 +507,35 @@ def evaluation(model, test, test_dates):
 				y = y.to('cpu')
 
 			# adding the decoded result to the predicted list after removing the channel dimension
-			predicted = torch.squeeze(predicted, dim=1).numpy()
+			# predicted = torch.squeeze(predicted, dim=1).numpy()
 
-			predicted_mean.append(predicted[:,0])
-			predicted_std.append(predicted[:,1])
+			# predicted_mean.append(predicted[:,0])
+			# predicted_std.append(predicted[:,1])
+			if len(predicted.shape) == 1:
+				predicted_class_1.append(predicted.numpy())
+				ytest_list.append(y.numpy())
+			else:
+				predicted_class_1.append(predicted[:,1].numpy())
+				ytest_list.append(y[:,1].numpy())
 
 			x = torch.squeeze(x, dim=1).numpy()
 
 			xtest_list.append(x)
-			ytest_list.append(y)
 
 	print(f'Evaluation Loss: {running_loss/len(test)}')
+	wandb.log({'test_loss':running_loss/len(test)})
 
 	# transforming the lists to arrays
-	predicted_mean = np.concatenate(predicted_mean, axis=0)
-	predicted_std = np.concatenate(predicted_std, axis=0)
+	# predicted_mean = np.concatenate(predicted_mean, axis=0)
+	predicted_class_1 = np.concatenate(predicted_class_1, axis=0)
 	xtest_list = np.concatenate(xtest_list, axis=0)
 	ytest_list = np.concatenate(ytest_list, axis=0)
-
-	results_df = pd.DataFrame({'predicted_mean':predicted_mean, 'predicted_std':predicted_std, 'actual':ytest_list, 'dates':test_dates['Date_UTC']})
+	print(test_dates)
+	prauc = utils.calibrating_prauc(ytest_list, predicted_class_1)
+	print(f'PRAUC: {prauc}')
+	wandb.log({'prauc':prauc})
+	# results_df = pd.DataFrame({'predicted_mean':predicted_mean, 'predicted_std':predicted_std, 'actual':ytest_list, 'dates':test_dates['Date_UTC']})
+	results_df = pd.DataFrame({'predicted':predicted_class_1, 'actual':ytest_list, 'dates':test_dates})
 
 	print(f'results df shape: {results_df.shape}')
 	print(f'results df: {results_df.head()}')
@@ -780,6 +548,25 @@ def main():
 	Pulls all the above functions together. Outputs a saved file with the results.
 
 	'''
+	CONFIG = {'time_history':60,
+			'random_seed':42,
+			'filters':128,
+			'learning_rate':1e-3,
+			'early_stop_patience':25,
+			'batch_size':128,
+			'epochs':500,
+			'loss':'BCE',
+			'using_weights_for_imbalance':True,
+			'oversampling':OVERSAMPLING,
+			'target':TARGET,
+			'target_dim':2,
+			'region':REGION,
+			'final_activation':'softmax',
+			'other_notes': 'lead: 6H+60, recovery 12H+60'
+			}
+
+	wandb.init(project='extended_modeling_v4', entity='mike-k-coughlan-university-of-new-hampshire', config=CONFIG, name='v11')
+
 	if not os.path.exists(f'outputs/{TARGET}'):
 		os.makedirs(f'outputs/{TARGET}')
 	if not os.path.exists(f'models/{TARGET}'):
@@ -788,26 +575,29 @@ def main():
 
 	# loading all data and indicies
 	print('Loading data...')
-	train_swmag, ___, ytrain, val_swmag, ___, yval, test_swmag, ___, ytest, dates_dict = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=OVERSAMPLING)
-	print(f'shape of train swmag: {train_swmag.shape}; shape of train y: {ytrain.shape}')
-	print(f'shape of val swmag: {val_swmag.shape}; shape of val y: {yval.shape}')
-	print(f'shape of test swmag: {test_swmag.shape}; shape of test y: {ytest.shape}')
-	# print('xtrain shape: '+str(xtrain.shape))
-	# print('xval shape: '+str(xval.shape))
-	print('xtest shape: '+str(test_swmag.shape))
-	# print('ytrain shape: '+str(ytrain.shape))
-	# print('yval shape: '+str(yval.shape))
-	print('ytest shape: '+str(ytest.shape))
-	with open(f'outputs/dates_dict_region_{REGION}_version_{VERSION}.pkl', 'wb') as f:
-		pickle.dump(dates_dict, f)
+	PD = PreparingData(target_param=TARGET, region=REGION, cluster=CLUSTER, oversampling=OVERSAMPLING, 
+						omni=False, config=CONFIG, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], 
+						mean=True, std=True, maximum=True, median=True, window=60, forecast=30, classification=True, version=VERSION)
 
+	train_dict, val_dict, test_dict = PD()
 
-	train_size = list(train_swmag.shape)
+	print(f"Train ratio: {train_dict['targets'].sum()/len(train_dict['targets'])} - Val ratio: {val_dict['targets'].sum()/len(val_dict['targets'])} - Test ratio: {test_dict['targets'].sum()/len(test_dict['targets'])}")
+
+	train_size = list(train_dict['storms'].shape)
+	# print(train_dict['targets'].shape)
+	# print(train_dict['targets'])
+	n0, n1 = (train_size[0]-train_dict['targets'][:,1].sum()), train_dict['targets'][:,1].sum()
+	print(f'n0: {n0}; n1: {n1}')
+	print(f'n0: {n0}; n1: {n1}')
+	print(f'train size: {train_size[0]}')
+	class_weights = torch.tensor([(n1/train_size[0]), (n0/train_size[0])]).to(DEVICE)
+	print(f'class weights: {class_weights}')
+	# class_weights = None
 
 	# creating the dataloaders
-	train = DataLoader(list(zip(train_swmag, ytrain)), batch_size=CONFIG['batch_size'], shuffle=True)
-	val = DataLoader(list(zip(val_swmag, yval)), batch_size=CONFIG['batch_size'], shuffle=True)
-	test = DataLoader(list(zip(test_swmag, ytest)), batch_size=CONFIG['batch_size'], shuffle=False)
+	train = DataLoader(list(zip(torch.tensor(train_dict['storms']).unsqueeze(1), torch.tensor(train_dict['targets']))), batch_size=CONFIG['batch_size'], shuffle=True, drop_last=True)
+	val = DataLoader(list(zip(torch.tensor(val_dict['storms']).unsqueeze(1), torch.tensor(val_dict['targets']))), batch_size=CONFIG['batch_size'], shuffle=True, drop_last=True)
+	test = DataLoader(list(zip(torch.tensor(test_dict['storms']).unsqueeze(1), torch.tensor(test_dict['targets']))), batch_size=CONFIG['batch_size'], shuffle=False)
 
 	# creating the model
 	print('Creating model....')
@@ -819,21 +609,23 @@ def main():
 
 	# printing model summary
 	model.to(DEVICE)
-	print(summary(model, (1, train_size[2], train_size[3])))
-
+	print(summary(model, (1, train_size[1], train_size[2])))
 	# fitting the model
 	print('Fitting model...')
-	model = fit_model(model, train, val, val_loss_patience=25, num_epochs=CONFIG['epochs'])
+	model = fit_model(model, train, val, class_weights=class_weights, val_loss_patience=25, num_epochs=CONFIG['epochs'], learning_rate=CONFIG['learning_rate'])
 
 	# making predictions
 	print('Making predictions...')
-	results_df = evaluation(model, test, dates_dict['test'])
+	results_df = evaluation(model, test, test_dict['dates'])
 	print(f'results df shape: {results_df.shape}')
 	print(f'results df: {results_df.tail()}')
+	results_df.reset_index(drop=True, inplace=True)
 	results_df.to_feather(f'outputs/{TARGET}/swmag_modeling_region_{REGION}_version_{VERSION}.feather')
 
 	# clearing the session to prevent memory leaks
 	gc.collect()
+	torch.cuda.empty_cache()
+	wandb.finish()
 
 
 if __name__ == '__main__':

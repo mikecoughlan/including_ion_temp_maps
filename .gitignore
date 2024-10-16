@@ -157,6 +157,7 @@ plots/
 models/
 data/
 outputs/
+wandb/
 
 # exempting pickle file
 cluster_dict.pkl
