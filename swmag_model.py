@@ -551,7 +551,7 @@ def main():
 	CONFIG = {'time_history':60,
 			'random_seed':42,
 			'filters':128,
-			'learning_rate':1e-3,
+			'learning_rate':1e-7,
 			'early_stop_patience':25,
 			'batch_size':128,
 			'epochs':500,
@@ -562,10 +562,10 @@ def main():
 			'target_dim':2,
 			'region':REGION,
 			'final_activation':'softmax',
-			'other_notes': 'lead: 6H+60, recovery 12H+60'
+			'other_notes': 'lead: 18H+60, recovery 18H+60'
 			}
 
-	wandb.init(project='extended_modeling_v4', entity='mike-k-coughlan-university-of-new-hampshire', config=CONFIG, name='v11')
+	wandb.init(project='extended_modeling_v4', entity='mike-k-coughlan-university-of-new-hampshire', config=CONFIG, name='FSC-4_v12')
 
 	if not os.path.exists(f'outputs/{TARGET}'):
 		os.makedirs(f'outputs/{TARGET}')
@@ -581,18 +581,20 @@ def main():
 
 	train_dict, val_dict, test_dict = PD()
 
-	print(f"Train ratio: {train_dict['targets'].sum()/len(train_dict['targets'])} - Val ratio: {val_dict['targets'].sum()/len(val_dict['targets'])} - Test ratio: {test_dict['targets'].sum()/len(test_dict['targets'])}")
+	print(f"Train ratio: {train_dict['targets'][:,1].sum()/len(train_dict['targets'])} - Val ratio: {val_dict['targets'][:,1].sum()/len(val_dict['targets'])} - Test ratio: {test_dict['targets'][:,1].sum()/len(test_dict['targets'])}")
 
 	train_size = list(train_dict['storms'].shape)
 	# print(train_dict['targets'].shape)
 	# print(train_dict['targets'])
-	n0, n1 = (train_size[0]-train_dict['targets'][:,1].sum()), train_dict['targets'][:,1].sum()
-	print(f'n0: {n0}; n1: {n1}')
-	print(f'n0: {n0}; n1: {n1}')
-	print(f'train size: {train_size[0]}')
-	class_weights = torch.tensor([(n1/train_size[0]), (n0/train_size[0])]).to(DEVICE)
-	print(f'class weights: {class_weights}')
-	# class_weights = None
+	if CONFIG['using_weights_for_imbalance']:
+		n0, n1 = (train_size[0]-train_dict['targets'][:,1].sum()), train_dict['targets'][:,1].sum()
+		print(f'n0: {n0}; n1: {n1}')
+		print(f'n0: {n0}; n1: {n1}')
+		print(f'train size: {train_size[0]}')
+		class_weights = torch.tensor([(n1/train_size[0]), (n0/train_size[0])]).to(DEVICE)
+		print(f'class weights: {class_weights}')
+	else:
+		class_weights = None
 
 	# creating the dataloaders
 	train = DataLoader(list(zip(torch.tensor(train_dict['storms']).unsqueeze(1), torch.tensor(train_dict['targets']))), batch_size=CONFIG['batch_size'], shuffle=True, drop_last=True)

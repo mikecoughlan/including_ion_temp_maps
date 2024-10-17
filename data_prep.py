@@ -488,7 +488,7 @@ class PreparingData():
 		# if not, calculating the twins maps and extracting the storms
 		else:
 			print('right here')
-			storm_dict = self.storm_extract(df=region_df, lead=420, recovery=780, target_var='classification')
+			storm_dict = self.storm_extract(df=region_df, lead=1140, recovery=1140, target_var='classification')
 			with open(self.working_dir+f'storm_extraction_region_{self.region_name}_version_{self.version}.pkl', 'wb') as f:
 				pickle.dump(storm_dict, f)
 
