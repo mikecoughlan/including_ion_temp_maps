@@ -530,7 +530,6 @@ def evaluation(model, test, test_dates):
 	predicted_class_1 = np.concatenate(predicted_class_1, axis=0)
 	xtest_list = np.concatenate(xtest_list, axis=0)
 	ytest_list = np.concatenate(ytest_list, axis=0)
-	print(test_dates)
 	prauc = utils.calibrating_prauc(ytest_list, predicted_class_1)
 	print(f'PRAUC: {prauc}')
 	wandb.log({'prauc':prauc})
@@ -565,7 +564,7 @@ def main():
 			'other_notes': 'lead: 18H+60, recovery 18H+60'
 			}
 
-	wandb.init(project='extended_modeling_v4', entity='mike-k-coughlan-university-of-new-hampshire', config=CONFIG, name='FSC-4_v12')
+	wandb.init(project=f'extended_v0-1_{CLUSTER}', entity='mike-k-coughlan-university-of-new-hampshire', config=CONFIG, name=f'{REGION}_{TARGET}')
 
 	if not os.path.exists(f'outputs/{TARGET}'):
 		os.makedirs(f'outputs/{TARGET}')
