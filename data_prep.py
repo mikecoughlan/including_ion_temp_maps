@@ -452,6 +452,19 @@ class PreparingData():
 
 		return pd.Series(temp_df.index)
 
+	def get_features(self):
+		'''
+		Getting the features that will be used in the model.
+
+		Returns:
+			features (list): list of features that will be used in the model.
+		'''
+		# loading the data
+		region_df = self.loading_data()
+		# getting the features
+		features = region_df.columns
+
+		return features
 
 	def __call__(self):
 		'''
@@ -540,6 +553,11 @@ class PreparingData():
 		print(f'Scaling array shape: {scaling_array.shape}')
 		scaler = StandardScaler()
 		scaler.fit(scaling_array)
+
+		with open(f'models/{self.target_param}/region_{self.region_name}_version_{self.version}_scaler.pkl', 'wb') as f:
+			pickle.dump(scaler, f)
+		raise ValueError('saved the scaler, on to the next one')
+
 		train_storms = [scaler.transform(x) for x in train_storms]
 		print('Finished training storms')
 		val_storms = [scaler.transform(x) for x in val_storms]
@@ -563,8 +581,7 @@ class PreparingData():
 		print('Finished testing storms')
 		print(f'Train storms: {train_storms[0].shape} Val storms: {val_storms[0].shape} Test storms: {test_storms[0].shape}')
 		# saving the scaler
-		with open(f'models/{self.target_param}/region_{self.region_name}_version_{self.version}_scaler.pkl', 'wb') as f:
-			pickle.dump(scaler, f)
+		
 
 		# trainX, trainy, trainD, valX, valy, valD, testX, testy, testD = [],[],[],[],[],[],[],[],[]
 		# for storm, target, date in zip(train_storms, train_targets, stored_train_dates):

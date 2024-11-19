@@ -128,7 +128,7 @@ class SWMAG(nn.Module):
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(128, 2),
-			nn.Softmax()
+			nn.Softmax(dim=1)
 			# nn.Linear(128, 1),
 			# nn.Sigmoid()
 		)
@@ -312,7 +312,7 @@ def fit_model(model, train, val, class_weights=None, val_loss_patience=25, overf
 		criterion = nn.BCELoss()
 		
 		# criterion = nn.BCELoss()
-		optimizer = optim.Adam(model.parameters(), lr=1e-7)
+		optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 		# initalizing the early stopping class
 		early_stopping = Early_Stopping(decreasing_loss_patience=val_loss_patience)
@@ -395,7 +395,7 @@ def fit_model(model, train, val, class_weights=None, val_loss_patience=25, overf
 			# getting the average loss for the epoch
 			loss = running_training_loss/len(train)
 			val_loss = running_val_loss/len(val)
-			wandb.log({'train_loss':loss, 'val_loss':val_loss})
+			# wandb.log({'train_loss':loss, 'val_loss':val_loss})
 			# adding the loss to the list
 			train_loss_list.append(loss)
 			val_loss_list.append(val_loss)
@@ -458,7 +458,7 @@ def fit_model(model, train, val, class_weights=None, val_loss_patience=25, overf
 	return model
 
 
-def evaluation(model, test, test_dates):
+def evaluation(model, test, test_dates, n_ensemble=100):
 	'''
 	Function using the trained models to make predictions with the testing data.
 
@@ -472,9 +472,12 @@ def evaluation(model, test, test_dates):
 	'''
 	print(f'length of test dates: {len(test_dates)}')
 	# creting an array to store the predictions
-	predicted_class_1, predicted_std, xtest_list, ytest_list = [], [], [], []
+	
 	# setting the encoder and decoder into evaluation model
-	model.eval()
+	# model.eval()
+
+	# setting the model to train mode to enable dropout layers
+	model.train()
 
 	# creating a loss value
 	running_loss = 0.0
@@ -482,62 +485,73 @@ def evaluation(model, test, test_dates):
 	# making sure the model is on the correct device
 	model.to(DEVICE, dtype=torch.float)
 
-	with torch.no_grad():
-		for x, y in test:
+	for i in tqdm.tqdm(range(n_ensemble)):
+		predicted_class_1, xtest_list, ytest_list = [], [], []
+		with torch.no_grad():
+			for x, y in test:
 
-			x = x.to(DEVICE, dtype=torch.float)
-			y = y.to(DEVICE, dtype=torch.float)
+				x = x.to(DEVICE, dtype=torch.float)
+				y = y.to(DEVICE, dtype=torch.float)
 
-			predicted = model(x)
-			predicted = predicted.squeeze()
-			
-			# getting shape of tensor
-			if len(predicted.shape) == 1:
-				loss = F.mse_loss(predicted, y)
-			else:
-				loss = F.mse_loss(predicted[:,1], y[:,1])
-			running_loss += loss.item()
+				predicted = model(x)
+				predicted = predicted.squeeze()
+				
+				# getting shape of tensor
+				if len(predicted.shape) == 1:
+					loss = F.mse_loss(predicted, y)
+				else:
+					loss = F.mse_loss(predicted[:,1], y[:,1])
+				running_loss += loss.item()
 
-			# making sure the predicted value is on the cpu
-			if predicted.get_device() != -1:
-				predicted = predicted.to('cpu')
-			if x.get_device() != -1:
-				x = x.to('cpu')
-			if y.get_device() != -1:
-				y = y.to('cpu')
+				# making sure the predicted value is on the cpu
+				if predicted.get_device() != -1:
+					predicted = predicted.to('cpu')
+				if x.get_device() != -1:
+					x = x.to('cpu')
+				if y.get_device() != -1:
+					y = y.to('cpu')
 
-			# adding the decoded result to the predicted list after removing the channel dimension
-			# predicted = torch.squeeze(predicted, dim=1).numpy()
+				# adding the decoded result to the predicted list after removing the channel dimension
+				# predicted = torch.squeeze(predicted, dim=1).numpy()
 
-			# predicted_mean.append(predicted[:,0])
-			# predicted_std.append(predicted[:,1])
-			if len(predicted.shape) == 1:
-				predicted_class_1.append(predicted.numpy())
-				ytest_list.append(y.numpy())
-			else:
-				predicted_class_1.append(predicted[:,1].numpy())
-				ytest_list.append(y[:,1].numpy())
+				# predicted_mean.append(predicted[:,0])
+				# predicted_std.append(predicted[:,1])
+				if len(predicted.shape) == 1:
+					predicted_class_1.append(predicted.numpy())
+					if i == 0:
+						ytest_list.append(y.numpy())
+				else:
+					predicted_class_1.append(predicted[:,1].numpy())
+					if i == 0:
+						ytest_list.append(y[:,1].numpy())
 
-			x = torch.squeeze(x, dim=1).numpy()
+				if i == 0:
+					x = torch.squeeze(x, dim=1).numpy()
 
-			xtest_list.append(x)
+					xtest_list.append(x)
 
-	print(f'Evaluation Loss: {running_loss/len(test)}')
-	wandb.log({'test_loss':running_loss/len(test)})
+	
 
 	# transforming the lists to arrays
 	# predicted_mean = np.concatenate(predicted_mean, axis=0)
-	predicted_class_1 = np.concatenate(predicted_class_1, axis=0)
-	xtest_list = np.concatenate(xtest_list, axis=0)
-	ytest_list = np.concatenate(ytest_list, axis=0)
-	prauc = utils.calibrating_prauc(ytest_list, predicted_class_1)
-	print(f'PRAUC: {prauc}')
-	wandb.log({'prauc':prauc})
-	# results_df = pd.DataFrame({'predicted_mean':predicted_mean, 'predicted_std':predicted_std, 'actual':ytest_list, 'dates':test_dates['Date_UTC']})
-	results_df = pd.DataFrame({'predicted':predicted_class_1, 'actual':ytest_list, 'dates':test_dates})
-
-	print(f'results df shape: {results_df.shape}')
-	print(f'results df: {results_df.head()}')
+		predicted_class_1 = np.concatenate(predicted_class_1, axis=0)
+		if i == 0:
+			xtest_list = np.concatenate(xtest_list, axis=0)
+			ytest_list = np.concatenate(ytest_list, axis=0)
+			results_df = pd.DataFrame({'predicted_0':predicted_class_1, 'actual':ytest_list, 'dates':test_dates})
+		else:
+			results_df[f'predicted_{i}'] = predicted_class_1
+	
+	# prauc = utils.calibrating_prauc(ytest_list, predicted_class_1)
+	# print(f'PRAUC: {prauc}')
+	# wandb.log({'prauc':prauc})
+	# # results_df = pd.DataFrame({'predicted_mean':predicted_mean, 'predicted_std':predicted_std, 'actual':ytest_list, 'dates':test_dates['Date_UTC']})
+	
+	# print(f'Evaluation Loss: {running_loss/len(test)}')
+	# wandb.log({'test_loss':running_loss/len(test)})
+	
+	# print(f'results df shape: {results_df.shape}')
+	# print(f'results df: {results_df.head()}')
 
 	return results_df
 
@@ -564,7 +578,7 @@ def main():
 			'other_notes': 'lead: 18H+60, recovery 18H+60'
 			}
 
-	wandb.init(project=f'extended_v0-1_{CLUSTER}', entity='mike-k-coughlan-university-of-new-hampshire', config=CONFIG, name=f'{REGION}_{TARGET}')
+	# wandb.init(project=f'extended_v0-1_{CLUSTER}', entity='mike-k-coughlan-university-of-new-hampshire', config=CONFIG, name=f'{REGION}_{TARGET}')
 
 	if not os.path.exists(f'outputs/{TARGET}'):
 		os.makedirs(f'outputs/{TARGET}')
@@ -621,12 +635,12 @@ def main():
 	print(f'results df shape: {results_df.shape}')
 	print(f'results df: {results_df.tail()}')
 	results_df.reset_index(drop=True, inplace=True)
-	results_df.to_feather(f'outputs/{TARGET}/swmag_modeling_region_{REGION}_version_{VERSION}.feather')
+	results_df.to_feather(f'outputs/{TARGET}/mc_swmag_modeling_region_{REGION}_version_{VERSION}.feather')
 
 	# clearing the session to prevent memory leaks
 	gc.collect()
 	torch.cuda.empty_cache()
-	wandb.finish()
+	# wandb.finish()
 
 
 if __name__ == '__main__':

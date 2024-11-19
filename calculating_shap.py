@@ -24,9 +24,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
+from torchsummary import summary
 import twins_model_v_autoencoder as twins_autoencoder 
 import twins_model_v_maxpooling as twins_maxpooling
 import swmag_model as swmag_modeling
+from data_prep import PreparingData
 
 import utils
 
@@ -45,7 +47,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {DEVICE}')
 
 
-CONFIG = {'time_history':30,
+CONFIG = {'time_history':60,
 			'random_seed':42,
 			'filters':128,
 			'learning_rate':1e-7,
@@ -80,14 +82,17 @@ def loading_model(auto_or_max='auto'):
 	
 	else:
 		raise ValueError('The model type must be either twins or swmag.')
-
 	checkpoint = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
 	# new_keys = ['conv_block.0.weight', 'conv_block.0.bias', 'conv_block.3.weight', 'conv_block.3.bias',
 	# 					'linear_block.0.weight', 'linear_block.0.bias', 'linear_block.3.weight', 'linear_block.3.bias', 'linear_block.6.weight', 'linear_block.6.bias']
 	# checkpoint['model'] = {new_key:value for new_key, value in zip(new_keys, checkpoint['model'].values())}
 	model.load_state_dict(checkpoint['model'])
+	print(model)
+	# Print the shape of each weight matrix
 	model.to(DEVICE)
 	model.eval()
+
+
 
 	return model
 
@@ -324,37 +329,58 @@ def main():
 	# 	raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
 
 
-	print(f'Preparing data....')
-	# preparing the data for the model
-	train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, \
-		dates_dict, features = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=False, get_features=True)
+	# print(f'Preparing data....')
+	# # preparing the data for the model
+	# train_swmag, train_twins, ytrain, val_swmag, val_twins, yval, test_swmag, test_twins, ytest, \
+	# 	dates_dict, features = utils.getting_prepared_data(target_var=TARGET, cluster=CLUSTER, region=REGION, version=VERSION, config=CONFIG, oversampling=False, get_features=True)
+
+	if not os.path.exists(f'outputs/{TARGET}'):
+		os.makedirs(f'outputs/{TARGET}')
+	if not os.path.exists(f'models/{TARGET}'):
+		os.makedirs(f'models/{TARGET}')
+	print(VERSION)
+
+	# loading all data and indicies
+	print('Loading data...')
+	PD = PreparingData(target_param=TARGET, region=REGION, cluster=CLUSTER, oversampling=False, 
+						omni=False, config=CONFIG, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], 
+						mean=True, std=True, maximum=True, median=True, window=60, forecast=30, classification=True, version=VERSION)
+
+	train_dict, val_dict, test_dict = PD()
+	features = PD.get_features()
 
 	if MODEL_TYPE == 'twins':		
-		training_data, testing_data = [train_swmag, train_twins], [test_swmag, test_twins]
+		raise ValueError('The twins model is not currently supported for the shap values.')
+		# training_data, testing_data = [train_swmag, train_twins], [test_swmag, test_twins]
 	elif MODEL_TYPE == 'swmag':
 		train_twins, val_twins, test_twins = None, None, None
-		training_data, testing_data = train_swmag, test_swmag
+		training_data, testing_data = torch.tensor(train_dict['storms']).unsqueeze(1), torch.tensor(test_dict['storms']).unsqueeze(1)
+	else:
+		raise ValueError('The model type must be either twins or swmag.')
 		
 
 	# if os.path.exists(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl'):
 		# raise ValueError(f'Shap values for region {REGION} already exist. Skipping....')
-
+	train_size = list(training_data.shape)
 	print('Loading model....')
 	MODEL = loading_model(auto_or_max='max')
+
+	print('Model summary....')
+	print(summary(MODEL, (1, train_size[2], train_size[3])))
 
 	print('Getting shap values....')
 	shap_values, expected_values = get_shap_values(model=MODEL, model_name=f'{REGION}_{VERSION}', 
 									training_data=training_data, 
 									testing_data=testing_data, 
-									background_examples=1000)
+									background_examples=500)
 	
 	if MODEL_TYPE == 'swmag':
 		twins_test=None
 
 	evaluation_dict = {'shap_values':shap_values, 
 						'testing_data':testing_data,
-						'ytest':ytest,
-						'Date_UTC':dates_dict['test'],
+						'ytest':test_dict['targets'],
+						'Date_UTC':test_dict['dates'],
 						'features':features,
 						'expected_values': expected_values}
 
