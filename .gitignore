@@ -163,4 +163,4 @@ wandb/
 cluster_dict.pkl
 
 #exempting exe files
-exe*
+exe*.sh
