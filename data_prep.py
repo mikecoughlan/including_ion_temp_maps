@@ -70,23 +70,33 @@ class PreparingData():
 		self.window = self.__dict__.get('window', 15)
 		self.classification = self.__dict__.get('classification', False)
 		self.target_param = self.__dict__.get('target_param', 'rsd')
+		self.specific_test_storms = self.__dict__.get('specific_test_storms', None)
+		self.start_time = self.__dict__.get('start_time', '1995-01-01')
+		self.end_time = self.__dict__.get('end_time', '2018-12-31')
+		self.ml_challenge = self.__dict__.get('ml_challenge', False)
 
 		print(f'Forecast: {self.forecast}, Window: {self.window}, Target parameter: {self.target_param}')
 
 
-	def loading_solarwind(self):
+	def loading_solarwind(self, solar_wind_data='ace'):
 		'''
 		Loads the solar wind data
 
 		Returns:
 			df (pd.dataframe): dataframe containing the solar wind data
 		'''
-
+		if not solar_wind_data in ['ace', 'dscovr', 'omni']:
+			raise ValueError('Invalid solar wind data source. Must be "ace", "dscovr", or "omni".')
 		print('Loading solar wind data....')
 		if self.omni:
 			self.solarwind = pd.read_csv('../data/SW/omni.csv')
 			self.solarwind.set_index('Epoch', inplace=True, drop=True)
 			self.solarwind.index = pd.to_datetime(self.solarwind.index, format='%Y-%m-%d %H:%M:%S')
+		elif solar_wind_data == 'dscovr':
+			self.solarwind = pd.read_csv(self.data_dir + 'dscovr/processed_dscovr_data.csv')
+			self.solarwind.set_index('Date_UTC', inplace=True, drop=True)
+			self.solarwind.index = pd.to_datetime(self.solarwind.index, format='%Y-%m-%d %H:%M:%S')
+			self.solarwind['Vx'] = self.solarwind['Vx']*(-1)
 		else:
 			self.solarwind = pd.read_feather('../data/SW/ace_data.feather')
 			self.solarwind.set_index('ACEepoch', inplace=True, drop=True)
@@ -107,8 +117,15 @@ class PreparingData():
 		'''
 
 		print(f'Loading station {station}....')
-		df = pd.read_feather(self.supermag_dir+station+'.feather')
+		if not self.ml_challenge:
+			df = pd.read_feather(self.supermag_dir+station+'.feather')
+		else:
+			df = pd.read_feather(self.supermag_dir+station+'_ml_challenge.feather')
 
+		if 'DATE_UTC' in df.columns:
+			df.rename(columns={'DATE_UTC':'Date_UTC'}, inplace=True)
+		if 'DBHT' or 'dbht' not in df.columns:
+			df['dbht'] = np.sqrt(((df['N'].diff(1))**2)+((df['E'].diff(1))**2)) # creates the combined dB/dt column
 		# limiting the analysis to the nightside
 		df.set_index('Date_UTC', inplace=True, drop=True)
 		df.index = pd.to_datetime(df.index, format='%Y-%m-%d %H:%M:$S')
@@ -119,7 +136,7 @@ class PreparingData():
 		return df
 
 
-	def classification_column(self, df, param, percentile=0.99):
+	def classification_column(self, df, param, percentile=0.99, set_threshold=None):
 		'''
 		Creating a new column which labels whether there will be a crossing of threshold
 			by the param selected in the forecast window.
@@ -137,9 +154,12 @@ class PreparingData():
 			pd.dataframe: df containing a bool column called crossing and a persistance colmun
 		'''
 
-		# creating the shifted parameter column
-		thresh = df[param].quantile(percentile)
-
+		if set_threshold is None:
+			# creating the shifted parameter column
+			thresh = df[param].quantile(percentile)
+		else:
+			thresh = set_threshold
+		print(f'THIS IS THE SET THRESHOLD: {thresh}')
 		# print(f'Threshold: {thresh}')
 
 		df[f'shifted_{param}'] = df[param].shift(-self.forecast)					# creates a new column that is the shifted parameter. Because time moves foreward with increasing
@@ -162,21 +182,21 @@ class PreparingData():
 
 		df['classification'] = np.select(conditions, binary)						# new column created using the conditions and the binary
 		# df['persistance'] = np.select(pers_conditions, binary)				# creating the persistance column
-
 		# df.drop(['pers_max', 'window_max', f'shifted_{param}'], axis=1, inplace=True)			# removes the working columns for memory purposes
 		df.drop(['window_max', f'shifted_{param}'], axis=1, inplace=True)			# removes the working columns for memory purposes
 
-		return df
+		return df, thresh
 
 
 	def getting_dbdt_dataframe(self):
 
-		dbdt_df = pd.DataFrame(index=pd.date_range(start='1995-01-01', end='2018-12-31 23:59:00', freq='min'))
+		dbdt_df = pd.DataFrame(index=pd.date_range(start=self.start_time, end=self.end_time, freq='min'))
 		for station in self.region['stations']:
 			# loading the station data
-			station_df = pd.read_feather(self.supermag_dir + station + '.feather')
-			station_df.set_index('Date_UTC', inplace=True)
-			station_df.index = pd.to_datetime(station_df.index)
+			# station_df = pd.read_feather(self.supermag_dir + station + '.feather')
+			station_df = self.loading_supermag(station)
+			# station_df.set_index('Date_UTC', inplace=True)
+			# station_df.index = pd.to_datetime(station_df.index)
 			# creating the dbdt time series
 			dbdt_df[station] = station_df['dbht']
 
@@ -228,9 +248,7 @@ class PreparingData():
 
 	def combining_stations_into_regions(self):
 
-		start_time = pd.to_datetime('1995-01-01')
-		end_time = pd.to_datetime('2018-12-31')
-		time_period = pd.date_range(start=start_time, end=end_time, freq='min')
+		time_period = pd.date_range(start=pd.to_datetime(self.start_time), end=pd.to_datetime(self.end_time), freq='min')
 
 		regional_df = pd.DataFrame(index=time_period)
 		self.mlt_df = pd.DataFrame(index=time_period)
@@ -272,15 +290,37 @@ class PreparingData():
 		rsd = self.calculating_rsd()
 
 		regional_df['rsd'] = rsd['max_rsd']
+		
 		regional_df['rolling_rsd'] = rsd['max_rsd'].rolling(indexer, min_periods=1).max()
 		regional_df['MLT'] = mlt
 		regional_df['cosMLT'] = np.cos(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 		regional_df['sinMLT'] = np.sin(regional_df['MLT'] * 2 * np.pi * 15 / 360)
 
 		if self.classification:
-			print(f'Target parameter: {self.target_param}')
-			regional_df = self.classification_column(df=regional_df, param=self.target_param, percentile=0.99)
 
+			if not self.ml_challenge:
+
+				print(f'Target parameter: {self.target_param}')
+				regional_df, threshold = self.classification_column(df=regional_df, param=self.target_param, percentile=0.99)
+
+				if os.path.exists(self.working_dir+'threshold_dict.pkl'):
+					with open(self.working_dir+'threshold_dict.pkl', 'rb') as f:
+						threshold_dict = pickle.load(f)
+				else:
+					threshold_dict = {'rsd':{}, 'dbht_max':{}}
+				threshold_dict[self.target_param][self.region_name] = threshold
+
+				with open(self.working_dir+'threshold_dict.pkl', 'wb') as f:
+					pickle.dump(threshold_dict, f)
+				
+				print(f'Region: {self.region_name}, Threshold: {threshold}')
+			
+			else:
+				with open(self.working_dir+'threshold_dict.pkl', 'rb') as f:
+					threshold_dict = pickle.load(f)
+				
+				threshold = threshold_dict[self.target_param][self.region_name]
+				regional_df, threshold = self.classification_column(df=regional_df, param=self.target_param, percentile=0.99, set_threshold=threshold)
 		return regional_df
 
 
@@ -299,23 +339,23 @@ class PreparingData():
 		return supermag_df
 
 
-	def loading_data(self):
+	def loading_data(self, solar_wind_data='ace', **kwargs):
 
 		# loading all the datasets and dictonaries
 
 		# loading all the datasets and dictonaries
 		supermag_df = self.RegionPreprocessing()	# loading the supermag data
-		solarwind = self.loading_solarwind()			# loading the solar wind data
-
+		solarwind = self.loading_solarwind(solar_wind_data=solar_wind_data)			# loading the solar wind data
 		# converting the solarwind data to log10
 		solarwind['logT'] = np.log10(solarwind['T'])
 		solarwind.drop(columns=['T'], inplace=True)
 
-		self.region_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
+		# self.region_df = pd.merge(supermag_df, solarwind, left_index=True, right_index=True, how='inner')
+		self.region_df = supermag_df.join(solarwind, how='left')
 
 		return self.region_df
 
-	def storm_extract(self, df, lead=2220, recovery=2880, target_var=None):
+	def storm_extract(self, df, storm_list=None, lead=2220, recovery=2880, target_var=None):
 
 		'''
 		Pulling out storms using a defined list of datetime strings, adding a lead and recovery time to it and
@@ -330,7 +370,6 @@ class PreparingData():
 			list: ace and supermag dataframes for storm times
 			list: np.arrays of shape (n,2) containing a one hot encoded boolean target array
 		'''
-		
 		storms, y = list(), list()				# initalizing the lists
 		all_storms, all_targets = pd.DataFrame(), pd.DataFrame()
 		skipped = 0
@@ -345,10 +384,14 @@ class PreparingData():
 
 		df.index = pd.to_datetime(df.index)
 
-		storm_list = pd.read_csv('stormList.csv', header=None, names=['dates'])
+		if storm_list is None:
+			storm_list = pd.read_csv('stormList.csv', header=None, names=['dates'])
 		# storm_list = storm_list['dates']
 
 		stime, etime = [], []					# will store the resulting time stamps here then append them to the storm time df
+
+		if isinstance(storm_list, list):		
+			storm_list = pd.DataFrame(storm_list, columns=['dates'])		# if the storm list is a list, convert it to a dataframe
 
 		# will loop through the storm dates, create a datetime object for the lead and recovery time stamps and append those to different lists
 		if not isinstance(storm_list['dates'][0], pd.Timestamp):
@@ -357,6 +400,8 @@ class PreparingData():
 		storm_list['stime'] = storm_list['dates'] - pd.Timedelta(minutes=lead)
 		storm_list['etime'] = storm_list['dates'] + pd.Timedelta(minutes=recovery)
 		storm_list['dates'] = storm_list['dates'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+		print(storm_list)
 
 		# data_dict = {date: {} for date in storm_list['dates']}
 		data_dict = {}
@@ -466,6 +511,55 @@ class PreparingData():
 
 		return features
 
+	def preping_specific_test_storms(self, storm_list, solar_wind_data='ace', lead=1140, recovery=1140):
+		'''
+		Preparing the specific test storms for the model.
+
+		Returns:
+			specific_storms (list): list of the specific test storms
+			specific_targets (list): list of the specific test storm targets
+			specific_dates (list): list of the specific test storm dates
+		'''
+
+		region_df = self.loading_data(solar_wind_data=solar_wind_data)
+		if self.vars_to_keep is None:
+			# reducing the dataframe to only the features that will be used in the model plus the target variable
+			self.vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+							'B_Total', 'BX_GSE', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'Vz', 'proton_density', 'logT']
+		
+		region_df = region_df[self.vars_to_keep]
+		# dropping the rows with nans
+		region_df.dropna(inplace=True)
+
+
+		test_dict, stored_test_dates = {}, pd.Series()
+
+		storm_dict = self.storm_extract(df=region_df, storm_list=storm_list, lead=lead, recovery=recovery, target_var='classification')
+
+		storm_dict = {key: value for key, value in storm_dict.items() if value['storm'].shape[0] > 0}
+
+		storms, targets, dates = [value['storm'] for value in storm_dict.values()], [value['target'] for value in storm_dict.values()], \
+									[key for key in storm_dict.keys()]
+
+		for storm in storms:
+			stored_test_dates = pd.concat([stored_test_dates, self.get_dates(storm)], axis=0)
+		
+		with open(f'{data_dir}mike_working_dir/including_ion_temp_maps/models/{self.target_param}/region_{self.region_name}_version_{self.version}_scaler.pkl', 'rb') as f:
+			scaler = pickle.load(f)
+		
+		storms = [scaler.transform(x) for x in storms]
+
+		storms, targets = self.split_sequences(storms, targets=targets, n_steps=self.config['time_history'],
+												model_type='regression', oversample=False)
+
+		test_dict['storms'], test_dict['targets'], test_dict['dates'] = storms, targets, stored_test_dates
+
+		return test_dict
+
+		# making sure the target variable has been dropped from the input data
+
+		
+
 	def __call__(self):
 		'''
 		Calling the data prep class without the TWINS data for this version of the model.
@@ -556,7 +650,6 @@ class PreparingData():
 
 		with open(f'models/{self.target_param}/region_{self.region_name}_version_{self.version}_scaler.pkl', 'wb') as f:
 			pickle.dump(scaler, f)
-		raise ValueError('saved the scaler, on to the next one')
 
 		train_storms = [scaler.transform(x) for x in train_storms]
 		print('Finished training storms')

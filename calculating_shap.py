@@ -41,6 +41,7 @@ supermag_dir = '../data/supermag/feather_files/'
 regions_dict = 'mike_working_dir/identifying_regions_data/identifying_regions_data/twins_era_identified_regions_min_2.pkl'
 regions_stat_dict = 'mike_working_dir/identifying_regions_data/identifying_regions_data/twins_era_stats_dict_radius_regions_min_2.pkl'
 working_dir = data_directory+'mike_working_dir/twins_data_modeling/'
+modeling_dir = data_directory+'mike_working_dir/including_ion_temp_maps/'
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -82,7 +83,7 @@ def loading_model(auto_or_max='auto'):
 	
 	else:
 		raise ValueError('The model type must be either twins or swmag.')
-	checkpoint = torch.load(f'models/{TARGET}/region_{REGION}_{VERSION}.pt')
+	checkpoint = torch.load(f'{modeling_dir}models/{TARGET}/region_{REGION}_{VERSION}.pt')
 	# new_keys = ['conv_block.0.weight', 'conv_block.0.bias', 'conv_block.3.weight', 'conv_block.3.bias',
 	# 					'linear_block.0.weight', 'linear_block.0.bias', 'linear_block.3.weight', 'linear_block.3.bias', 'linear_block.6.weight', 'linear_block.6.bias']
 	# checkpoint['model'] = {new_key:value for new_key, value in zip(new_keys, checkpoint['model'].values())}
@@ -346,8 +347,16 @@ def main():
 						omni=False, config=CONFIG, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], 
 						mean=True, std=True, maximum=True, median=True, window=60, forecast=30, classification=True, version=VERSION)
 
-	train_dict, val_dict, test_dict = PD()
+	train_dict, val_dict, _____ = PD()
 	features = PD.get_features()
+
+	data_prep = PreparingData(target_param=TARGET, region=REGION, cluster=CLUSTER, oversampling=False, 
+						omni=False, config=CONFIG, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], 
+						mean=True, std=True, maximum=True, median=True, window=60, forecast=30, classification=True, version=VERSION,
+						start_time='2018-01-01', end_time='2024-12-31 23:59:00', ml_challenge=True)
+
+	test_dict = data_prep.preping_specific_test_storms(storm_list=['2023-01-04 09:04:00', '2023-05-06 05:11:00', '2024-05-11 02:14:00'], solar_wind_data='dscovr')
+
 
 	if MODEL_TYPE == 'twins':		
 		raise ValueError('The twins model is not currently supported for the shap values.')
@@ -386,7 +395,7 @@ def main():
 
 	print('Dates in evaluation dict: '+str(evaluation_dict['Date_UTC'].shape))
 
-	with open(f'outputs/shap_values/{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl', 'wb') as f:
+	with open(f'{modeling_dir}outputs/shap_values/ml_challenge_{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl', 'wb') as f:
 		pickle.dump(evaluation_dict, f)
 
 	print('Plotting shap values....')
