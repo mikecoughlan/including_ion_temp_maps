@@ -524,8 +524,8 @@ class PreparingData():
 		region_df = self.loading_data(solar_wind_data=solar_wind_data)
 		if self.vars_to_keep is None:
 			# reducing the dataframe to only the features that will be used in the model plus the target variable
-			self.vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
-							'B_Total', 'BX_GSE', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'Vz', 'proton_density', 'logT']
+			self.vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+							'BX_GSE', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'Vz', 'proton_density', 'logT']
 		
 		region_df = region_df[self.vars_to_keep]
 		# dropping the rows with nans
@@ -578,8 +578,8 @@ class PreparingData():
 		
 		if self.vars_to_keep is None:
 			# reducing the dataframe to only the features that will be used in the model plus the target variable
-			self.vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'MAGNITUDE_std', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
-							'B_Total', 'BX_GSE', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'Vz', 'proton_density', 'logT']
+			self.vars_to_keep = ['classification', 'dbht_median', 'MAGNITUDE_median', 'sin_theta_std', 'cos_theta_std', 'cosMLT', 'sinMLT',
+							'BX_GSE', 'BY_GSM', 'BZ_GSM', 'Vx', 'Vy', 'Vz', 'proton_density', 'logT']
 		
 		region_df = region_df[self.vars_to_keep]
 		print(region_df.head())

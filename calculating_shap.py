@@ -347,15 +347,15 @@ def main():
 						omni=False, config=CONFIG, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], 
 						mean=True, std=True, maximum=True, median=True, window=60, forecast=30, classification=True, version=VERSION)
 
-	train_dict, val_dict, _____ = PD()
+	train_dict, val_dict, test_dict= PD()
 	features = PD.get_features()
 
-	data_prep = PreparingData(target_param=TARGET, region=REGION, cluster=CLUSTER, oversampling=False, 
-						omni=False, config=CONFIG, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], 
-						mean=True, std=True, maximum=True, median=True, window=60, forecast=30, classification=True, version=VERSION,
-						start_time='2018-01-01', end_time='2024-12-31 23:59:00', ml_challenge=True)
+	# data_prep = PreparingData(target_param=TARGET, region=REGION, cluster=CLUSTER, oversampling=False, 
+	# 					omni=False, config=CONFIG, features=['dbht', 'MAGNITUDE', 'theta', 'N', 'E', 'sin_theta', 'cos_theta'], 
+	# 					mean=True, std=True, maximum=True, median=True, window=60, forecast=30, classification=True, version=VERSION,
+	# 					start_time='2018-01-01', end_time='2024-12-31 23:59:00', ml_challenge=True)
 
-	test_dict = data_prep.preping_specific_test_storms(storm_list=['2023-01-04 09:04:00', '2023-05-06 05:11:00', '2024-05-11 02:14:00'], solar_wind_data='dscovr')
+	# test_dict = data_prep.preping_specific_test_storms(storm_list=['2023-01-04 09:04:00', '2023-05-06 05:11:00', '2024-05-11 02:14:00'], solar_wind_data='dscovr')
 
 
 	if MODEL_TYPE == 'twins':		
@@ -379,9 +379,9 @@ def main():
 
 	print('Getting shap values....')
 	shap_values, expected_values = get_shap_values(model=MODEL, model_name=f'{REGION}_{VERSION}', 
-									training_data=training_data, 
-									testing_data=testing_data, 
-									background_examples=500)
+													training_data=training_data, 
+													testing_data=testing_data, 
+													background_examples=1000)
 	
 	if MODEL_TYPE == 'swmag':
 		twins_test=None
@@ -395,7 +395,7 @@ def main():
 
 	print('Dates in evaluation dict: '+str(evaluation_dict['Date_UTC'].shape))
 
-	with open(f'{modeling_dir}outputs/shap_values/ml_challenge_{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl', 'wb') as f:
+	with open(f'{modeling_dir}outputs/shap_values/new_{MODEL_TYPE}_region_{REGION}_{VERSION}.pkl', 'wb') as f:
 		pickle.dump(evaluation_dict, f)
 
 	print('Plotting shap values....')

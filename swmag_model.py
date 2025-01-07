@@ -121,7 +121,7 @@ class SWMAG(nn.Module):
 			nn.ReLU(),
 		)
 		self.linear_block = nn.Sequential(
-			nn.Linear(256*30*8, 256),
+			nn.Linear(256*30*7, 256),
 			nn.ReLU(),
 			nn.Dropout(0.2),
 			nn.Linear(256, 128),
@@ -136,7 +136,7 @@ class SWMAG(nn.Module):
 	def forward(self, x):
 
 		x = self.conv_block(x)
-		x = torch.reshape(x, (-1, 256*30*8))
+		x = torch.reshape(x, (-1, 256*30*7))
 		x = self.linear_block(x)
 
 		# clipping to avoid values too small for backprop
